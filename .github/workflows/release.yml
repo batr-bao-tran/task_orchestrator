@@ -1,0 +1,71 @@
+# Release: build, test, and package installable tarballs (Linux amd64, macOS)
+# Trigger: publish a release (tag v*) or run workflow_dispatch
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux_amd64
+          - os: macos-14
+            platform: macos_arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bazel
+        uses: bazel-contrib/setup-bazel@0.8.0
+        with:
+          bazel_version: "7.0.0"
+
+      - name: Build
+        run: bazel build //task_orchestrator:task_orchestrator
+
+      - name: Test
+        run: bazel test //tests/unit:all //tests/scenario:all --test_output=errors
+
+      - name: Prepare package
+        id: pkg
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          [[ "$VERSION" == "" || "$VERSION" == "$GITHUB_REF_NAME" ]] && VERSION="0.0.0-dev"
+          PKGDIR="task_orchestrator-${VERSION}-${{ matrix.platform }}"
+          mkdir -p "$PKGDIR/include" "$PKGDIR/lib"
+          cp -r task_orchestrator/include/task_orchestrator "$PKGDIR/include/"
+          LIBDIR=$(find bazel-bin/task_orchestrator -maxdepth 1 -type f \( -name '*.a' -o -name '*.so' -o -name '*.dylib' \) 2>/dev/null | head -1)
+          if [ -n "$LIBDIR" ]; then
+            cp "$LIBDIR" "$PKGDIR/lib/"
+          fi
+          tar czf "${PKGDIR}.tar.gz" "$PKGDIR"
+          echo "package=${PKGDIR}.tar.gz" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: task_orchestrator-${{ matrix.platform }}
+          path: ${{ steps.pkg.outputs.package }}
+
+  # Upload release assets when triggered by release published
+  upload-release-assets:
+    needs: package
+    if: github.event_name == 'release'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/**/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

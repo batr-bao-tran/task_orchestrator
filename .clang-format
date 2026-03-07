@@ -1,0 +1,12 @@
+---
+BasedOnStyle: Google
+Standard: c++20
+ColumnLimit: 120
+
+BinPackArguments: false
+BinPackParameters: false
+
+DerivePointerAlignment: false
+PointerAlignment: Left
+QualifierAlignment: Left
+ReferenceAlignment: Left

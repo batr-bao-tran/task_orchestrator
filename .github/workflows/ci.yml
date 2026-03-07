@@ -1,0 +1,43 @@
+# CI: build and test on push/PR (lld installed for linking)
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install lld (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - name: Set up Bazel
+        uses: bazel-contrib/setup-bazel@0.8.0
+        with:
+          bazel_version: "7.0.0"
+
+      - name: Build (lld on Linux only)
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-22.04" ]; then
+            bazel build --config=lld //task_orchestrator:task_orchestrator //application/...
+          else
+            bazel build //task_orchestrator:task_orchestrator //application/...
+          fi
+
+      - name: Test
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-22.04" ]; then
+            bazel test --config=lld //tests/unit:all //tests/scenario:all //application/tests/... --test_output=errors
+          else
+            bazel test //tests/unit:all //tests/scenario:all //application/tests/... --test_output=errors
+          fi

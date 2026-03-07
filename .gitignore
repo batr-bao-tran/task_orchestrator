@@ -1,0 +1,50 @@
+# Build artifacts are not committed. Build locally or use CI/release artifacts.
+
+# Bazel
+bazel-*
+.bazelrc.user
+*.bazel.lock
+
+# Compiled / generated
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python (pre-commit)
+.python-version
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Test / coverage
+*.gcno
+*.gcda
+*.gcov
+coverage/
+.coverage
+htmlcov/
+
+# Misc
+*.log
+*.tmp
+.cache/
