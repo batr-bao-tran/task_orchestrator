@@ -1,0 +1,10 @@
+--- a/boost/config/stdlib/libstdcpp3.hpp
++++ b/boost/config/stdlib/libstdcpp3.hpp
+@@ -101,7 +101,7 @@
+ #undef BOOST_HAS_MAP_HEADER
+ #endif
+-#if !__has_include(BOOST_SLIST_HEADER)
++#if !__has_include(<ext/slist>)
+ #undef BOOST_HAS_SLIST
+ #undef BOOST_HAS_SLIST_HEADER
+ #endif

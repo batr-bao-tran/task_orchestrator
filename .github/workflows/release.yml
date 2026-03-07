@@ -24,7 +24,7 @@ jobs:
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
         with:
-          bazel_version: "7.0.0"
+          bazel_version: "9.0.0"
 
       - name: Build
         run: bazel build //task_orchestrator:task_orchestrator

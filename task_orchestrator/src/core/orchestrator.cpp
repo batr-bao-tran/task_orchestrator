@@ -24,20 +24,21 @@ struct Orchestrator::Impl {
   }
 
   void run_planning(Time now) {
-    latest_schedule_ = scheduler_.plan(workflow_, workflow_state_, registry_, now, strategy_.get());
+    latest_schedule_ = Scheduler::plan(workflow_, workflow_state_, registry_, now, strategy_.get());
     if (latest_schedule_.ok && !latest_schedule_.assignments.empty()) {
       fsm_.process_event(ScheduleReady{});
     }
   }
 
   void apply_dispatch() {
-    for (const Assignment& a : latest_schedule_.assignments) {
-      workflow_state_.assigned_tasks.push_back(a.task_id);
-      Actor* actor = registry_.get_mutable(a.actor_id);
+    for (const Assignment& assignment : latest_schedule_.assignments) {
+      workflow_state_.assigned_tasks.push_back(assignment.task_id);
+      Actor* actor = registry_.get_mutable(assignment.actor_id);
       if (actor) {
         actor->current_load++;
       }
-      workflow_state_.actor_load[a.actor_id] = registry_.get(a.actor_id) ? registry_.get(a.actor_id)->current_load : 0;
+      workflow_state_.actor_load[assignment.actor_id] =
+          registry_.get(assignment.actor_id) ? registry_.get(assignment.actor_id)->current_load : 0U;
     }
     fsm_.process_event(DispatchComplete{});
   }
@@ -87,9 +88,9 @@ void Orchestrator::tick(Time now) {
   }
 }
 
-void Orchestrator::complete_phase(PhaseId phase_id) {
+void Orchestrator::complete_phase(const PhaseId& phase_id) {
   auto& completed = impl_->workflow_state_.completed_phases;
-  if (std::find(completed.begin(), completed.end(), phase_id) == completed.end()) {
+  if (std::ranges::find(completed, phase_id) == completed.end()) {
     completed.push_back(phase_id);
   }
   impl_->fsm_.process_event(PhaseComplete{});

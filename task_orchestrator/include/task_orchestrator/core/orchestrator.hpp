@@ -29,7 +29,7 @@ class Orchestrator {
   void start();
   void tick(Time now);
   /** Mark a phase as complete; call when all tasks in that phase are done. */
-  void complete_phase(PhaseId phase_id);
+  void complete_phase(const PhaseId& phase_id);
 
   PlannerState current_planner_state() const;
   ScheduleResult get_latest_schedule() const;

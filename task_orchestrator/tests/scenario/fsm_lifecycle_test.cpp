@@ -9,6 +9,7 @@
 #include "task_orchestrator/data/phase.hpp"
 #include "task_orchestrator/data/process.hpp"
 
+namespace {
 namespace to = task_orchestrator;
 
 TEST(FsmLifecycleTest, StateChangeCallback) {
@@ -23,17 +24,19 @@ TEST(FsmLifecycleTest, StateChangeCallback) {
   fsm.process_event(to::PhaseComplete{});
   fsm.process_event(to::AllPhasesComplete{});
 
-  ASSERT_GE(states.size(), 1u);
+  ASSERT_GE(states.size(), 1U);
   EXPECT_EQ(to::PlannerState::Idle, fsm.current_state());
 }
 
 TEST(FsmLifecycleTest, OrchestratorStartAndTick) {
   to::Orchestrator o;
   to::Workflow w("wf1");
-  w.add_phase(to::Phase{"ph", "Ph", {"P1"}, {}});
-  w.add_process(to::Process{"P1", "ph", {}, 10, 0, {}});
+  w.add_phase(to::Phase{.id = "ph", .name = "Ph", .process_ids = {"P1"}, .dependency_phase_ids = {}});
+  w.add_process(to::Process{
+      .id = "P1", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 10, .priority = 0, .deadline = {}});
   o.set_workflow(std::move(w));
-  o.register_actor(to::Actor{"A1", 1, {{0, 1000}}, 0});
+  o.register_actor(
+      to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 1000}}, .current_load = 0});
 
   o.start();
   to::PlannerState s0 = o.current_planner_state();
@@ -45,3 +48,4 @@ TEST(FsmLifecycleTest, OrchestratorStartAndTick) {
               o.current_planner_state() == to::PlannerState::Planning ||
               o.current_planner_state() == to::PlannerState::Dispatching);
 }
+}  // namespace

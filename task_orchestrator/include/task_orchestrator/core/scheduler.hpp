@@ -6,9 +6,9 @@
 
 #include "task_orchestrator/core/actor.hpp"
 #include "task_orchestrator/core/workflow.hpp"
-#include "task_orchestrator/data/types.hpp"
 #include "task_orchestrator/strategy/scheduling_strategy.hpp"
-#include "task_orchestrator/utils/generator.hpp"
+#include "utils/generator.hpp"
+#include "utils/types.hpp"
 
 namespace task_orchestrator {
 
@@ -48,18 +48,18 @@ class ActorRegistry {
 class Scheduler {
  public:
   /** \param strategy If null, earliest-deadline-first is used. */
-  ScheduleResult plan(const Workflow& workflow,
-                      const WorkflowState& state,
-                      const ActorRegistry& registry,
-                      Time now,
-                      const SchedulingStrategy* strategy = nullptr) const;
+  static ScheduleResult plan(const Workflow& workflow,
+                             const WorkflowState& state,
+                             const ActorRegistry& registry,
+                             Time now,
+                             const SchedulingStrategy* strategy = nullptr);
 
   /** Coroutine: yields assignments one-by-one (lazy). \param strategy If null, EDF is used. */
-  Generator<Assignment> plan_lazy(const Workflow& workflow,
-                                  const WorkflowState& state,
-                                  const ActorRegistry& registry,
-                                  Time now,
-                                  const SchedulingStrategy* strategy = nullptr) const;
+  static Generator<Assignment> plan_lazy(const Workflow& workflow,
+                                         const WorkflowState& state,
+                                         const ActorRegistry& registry,
+                                         Time now,
+                                         const SchedulingStrategy* strategy = nullptr);
 };
 
 }  // namespace task_orchestrator

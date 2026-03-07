@@ -1,4 +1,3 @@
-# C++20 for task_orchestrator (coroutines, ranges, concepts)
 build --cxxopt=-std=c++20
 build --host_cxxopt=-std=c++20
 
@@ -14,8 +13,7 @@ build --host_linkopt=-fuse-ld=gold
 build:bfd --linkopt=-fuse-ld=bfd
 build:bfd --host_linkopt=-fuse-ld=bfd
 
-# Prefer strict warnings in CI; optional for local dev
-# build --cxxopt=-Wall --cxxopt=-Wextra
+build --cxxopt=-Wall --cxxopt=-Wextra
 
 # Test output
 test --test_output=errors

@@ -6,11 +6,12 @@
 #include "task_orchestrator/data/phase.hpp"
 #include "task_orchestrator/data/process.hpp"
 
+namespace {
 namespace to = task_orchestrator;
 
 TEST(SubprocessWorkflowTest, TaskIdsAndSchedule) {
   to::Workflow w("sub_wf");
-  w.add_phase(to::Phase{"ph", "Phase", {"P1"}, {}});
+  w.add_phase(to::Phase{.id = "ph", .name = "Phase", .process_ids = {"P1"}, .dependency_phase_ids = {}});
   to::Process p1;
   p1.id = "P1";
   p1.phase_id = "ph";
@@ -19,17 +20,17 @@ TEST(SubprocessWorkflowTest, TaskIdsAndSchedule) {
   p1.priority = 0;
   w.add_process(std::move(p1));
 
-  auto tids = w.task_ids_for_phase("ph");
-  ASSERT_EQ(3u, tids.size());
+  const auto tids = w.task_ids_for_phase("ph");
+  ASSERT_EQ(3U, tids.size());
   EXPECT_EQ("P1", tids[0]);
   EXPECT_EQ("SP1", tids[1]);
   EXPECT_EQ("SP2", tids[2]);
 
   to::WorkflowState state;
   to::ActorRegistry reg;
-  reg.add(to::Actor{"A1", 3, {{0, 1000}}, 0});
-  to::Scheduler sched;
-  auto result = sched.plan(w, state, reg, 0);
+  reg.add(to::Actor{.id = "A1", .capacity = 3, .availability_windows = {{.start = 0, .end = 1000}}, .current_load = 0});
+  const auto result = to::Scheduler::plan(w, state, reg, 0);
   ASSERT_TRUE(result.ok);
-  EXPECT_EQ(3u, result.assignments.size());
+  EXPECT_EQ(3U, result.assignments.size());
 }
+}  // namespace

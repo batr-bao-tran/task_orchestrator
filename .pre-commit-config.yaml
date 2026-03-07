@@ -42,6 +42,15 @@ repos:
     hooks:
       - id: clang-format
         files: \.(cpp|cxx|c|cc|h|hpp|hxx|txx)$
+  - repo: local
+    hooks:
+      - id: clang-tidy-fix
+        name: clang-tidy
+        entry: python3 scripts/run_clang_tidy_fix.py --fix
+        language: system
+        files: \.(cpp|cxx|cc|h|hpp|hxx|txx)$
+        exclude: '((^|/)third_party/|(^|/)external/)'
+        pass_filenames: true
   # Header guards: PROJECT__PATH__FILE_HPP_
   - repo: local
     hooks:

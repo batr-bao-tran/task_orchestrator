@@ -7,23 +7,26 @@
 #include "task_orchestrator/data/phase.hpp"
 #include "task_orchestrator/data/process.hpp"
 
+namespace {
 namespace to = task_orchestrator;
 
 TEST(PriorityOnlyStrategyTest, OrdersByPriorityOnly) {
   to::Workflow w("wf");
-  w.add_phase(to::Phase{"ph", "Ph", {"P1", "P2", "P3"}, {}});
-  w.add_process(to::Process{"P1", "ph", {}, 1, 1, 100});
-  w.add_process(to::Process{"P2", "ph", {}, 1, 10, 200});
-  w.add_process(to::Process{"P3", "ph", {}, 1, 5, 50});
+  w.add_phase(to::Phase{.id = "ph", .name = "Ph", .process_ids = {"P1", "P2", "P3"}, .dependency_phase_ids = {}});
+  w.add_process(to::Process{
+      .id = "P1", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 1, .priority = 1, .deadline = 100});
+  w.add_process(to::Process{
+      .id = "P2", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 1, .priority = 10, .deadline = 200});
+  w.add_process(to::Process{
+      .id = "P3", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 1, .priority = 5, .deadline = 50});
 
   to::ActorRegistry reg;
-  reg.add(to::Actor{"A1", 3, {{0, 1000}}, 0});
+  reg.add(to::Actor{.id = "A1", .capacity = 3, .availability_windows = {{.start = 0, .end = 1000}}, .current_load = 0});
   to::WorkflowState state;
-  to::Scheduler sched;
   to::PriorityOnlyStrategy prio;
-  auto result = sched.plan(w, state, reg, 0, &prio);
+  auto result = to::Scheduler::plan(w, state, reg, 0, &prio);
   ASSERT_TRUE(result.ok);
-  ASSERT_EQ(3u, result.assignments.size());
+  ASSERT_EQ(3U, result.assignments.size());
   // Priority only: 10, 5, 1. Ties by id. So P2(10), P3(5), P1(1).
   EXPECT_EQ(result.assignments[0].task_id, "P2");
   EXPECT_EQ(result.assignments[1].task_id, "P3");
@@ -32,18 +35,24 @@ TEST(PriorityOnlyStrategyTest, OrdersByPriorityOnly) {
 
 TEST(PriorityOnlyStrategyTest, IgnoresDeadline) {
   to::Workflow w("wf");
-  w.add_phase(to::Phase{"ph", "Ph", {"Pa", "Pb"}, {}});
-  w.add_process(to::Process{"Pa", "ph", {}, 1, 5, 10});  // earlier deadline
-  w.add_process(to::Process{"Pb", "ph", {}, 1, 5, 100});
+  w.add_phase(to::Phase{.id = "ph", .name = "Ph", .process_ids = {"Pa", "Pb"}, .dependency_phase_ids = {}});
+  w.add_process(to::Process{.id = "Pa",
+                            .phase_id = "ph",
+                            .sub_process_ids = {},
+                            .estimated_duration = 1,
+                            .priority = 5,
+                            .deadline = 10});  // earlier deadline
+  w.add_process(to::Process{
+      .id = "Pb", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 1, .priority = 5, .deadline = 100});
   to::ActorRegistry reg;
-  reg.add(to::Actor{"A1", 2, {{0, 1000}}, 0});
+  reg.add(to::Actor{.id = "A1", .capacity = 2, .availability_windows = {{.start = 0, .end = 1000}}, .current_load = 0});
   to::WorkflowState state;
-  to::Scheduler sched;
   to::PriorityOnlyStrategy prio;
-  auto result = sched.plan(w, state, reg, 0, &prio);
+  auto result = to::Scheduler::plan(w, state, reg, 0, &prio);
   ASSERT_TRUE(result.ok);
-  ASSERT_EQ(2u, result.assignments.size());
+  ASSERT_EQ(2U, result.assignments.size());
   // Same priority; tie-break by id: Pa < Pb
   EXPECT_EQ(result.assignments[0].task_id, "Pa");
   EXPECT_EQ(result.assignments[1].task_id, "Pb");
 }
+}  // namespace

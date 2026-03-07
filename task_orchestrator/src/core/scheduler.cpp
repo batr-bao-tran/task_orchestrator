@@ -38,7 +38,7 @@ std::vector<TaskInfo> collect_pending_tasks(const Workflow& workflow, const Work
   for (const PhaseId& ph_id : ready) {
     std::vector<TaskId> tids = workflow.task_ids_for_phase(ph_id);
     for (const TaskId& tid : tids) {
-      if (assigned.count(tid)) continue;
+      if (assigned.contains(tid)) continue;
       const Process* proc = workflow.process_for_task(tid);
       Duration dur = 1;
       Priority prio = 0;
@@ -48,7 +48,7 @@ std::vector<TaskInfo> collect_pending_tasks(const Workflow& workflow, const Work
         prio = proc->priority;
         deadline = proc->deadline;
       }
-      out.push_back({tid, ph_id, dur, prio, deadline});
+      out.push_back({.id = tid, .phase_id = ph_id, .duration = dur, .priority = prio, .deadline = deadline});
     }
   }
   return out;
@@ -68,7 +68,7 @@ ScheduleResult Scheduler::plan(const Workflow& workflow,
                                const WorkflowState& state,
                                const ActorRegistry& registry,
                                Time now,
-                               const SchedulingStrategy* strategy) const {
+                               const SchedulingStrategy* strategy) {
   ScheduleResult result;
   result.ok = true;
   std::vector<TaskInfo> pending = collect_pending_tasks(workflow, state);
@@ -78,7 +78,7 @@ ScheduleResult Scheduler::plan(const Workflow& workflow,
 
   std::unordered_map<ActorId, int> load = state.actor_load;
   for (const ActorId& aid : registry.actor_ids()) {
-    if (load.count(aid) == 0) {
+    if (!load.contains(aid)) {
       const Actor* a = registry.get(aid);
       load[aid] = a ? a->current_load : 0;
     }
@@ -100,7 +100,7 @@ ScheduleResult Scheduler::plan(const Workflow& workflow,
       }
     }
     if (!found) continue;
-    result.assignments.push_back(Assignment{ti.id, best_actor, best_start});
+    result.assignments.push_back(Assignment{.task_id = ti.id, .actor_id = best_actor, .start_time = best_start});
     load[best_actor]++;
   }
   return result;
@@ -110,13 +110,13 @@ Generator<Assignment> Scheduler::plan_lazy(const Workflow& workflow,
                                            const WorkflowState& state,
                                            const ActorRegistry& registry,
                                            Time now,
-                                           const SchedulingStrategy* strategy) const {
+                                           const SchedulingStrategy* strategy) {
   std::vector<TaskInfo> pending = collect_pending_tasks(workflow, state);
   apply_strategy(pending, strategy);
 
   std::unordered_map<ActorId, int> load = state.actor_load;
   for (const ActorId& aid : registry.actor_ids()) {
-    if (load.count(aid) == 0) {
+    if (!load.contains(aid)) {
       const Actor* a = registry.get(aid);
       load[aid] = a ? a->current_load : 0;
     }
@@ -139,7 +139,7 @@ Generator<Assignment> Scheduler::plan_lazy(const Workflow& workflow,
     }
     if (found) {
       load[best_actor]++;
-      co_yield Assignment{ti.id, best_actor, best_start};
+      co_yield Assignment{.task_id = ti.id, .actor_id = best_actor, .start_time = best_start};
     }
   }
   co_return;

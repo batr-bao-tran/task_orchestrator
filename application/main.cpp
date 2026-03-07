@@ -16,7 +16,7 @@ int main(int argc, char** argv) {
 
   task_orchestrator::app::WorkflowConfig config;
   if (std::strcmp(path, "-") == 0) {
-    std::string content(std::istreambuf_iterator<char>(std::cin), std::istreambuf_iterator<char>());
+    const std::string content{std::istreambuf_iterator<char>(std::cin), std::istreambuf_iterator<char>()};
     config = task_orchestrator::app::load_config_from_string(content);
   } else {
     config = task_orchestrator::app::load_config_from_file(path);

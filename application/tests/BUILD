@@ -27,7 +27,7 @@ cc_test(
     deps = [
         "//application:runner",
         "//task_orchestrator",
-        "//task_orchestrator/utils",
+        "//utils",
         "@googletest//:gtest_main",
     ],
 )

@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+namespace {
 namespace to = task_orchestrator;
 
 TEST(ActorTest, CanAcceptAt) {
@@ -9,7 +10,7 @@ TEST(ActorTest, CanAcceptAt) {
   a.id = "A1";
   a.capacity = 2;
   a.current_load = 0;
-  a.availability_windows = {{0, 1000}};
+  a.availability_windows = {{.start = 0, .end = 1000}};
   EXPECT_TRUE(a.can_accept_at(0, 10));
   EXPECT_TRUE(a.can_accept_at(990, 10));
   EXPECT_FALSE(a.can_accept_at(991, 10));
@@ -22,7 +23,7 @@ TEST(ActorTest, CanAcceptAt) {
 TEST(ActorTest, NextAvailableStart) {
   to::Actor a;
   a.current_load = 0;
-  a.availability_windows = {{100, 200}, {300, 400}};
+  a.availability_windows = {{.start = 100, .end = 200}, {.start = 300, .end = 400}};
 
   auto t = a.next_available_start(0, 50);
   ASSERT_TRUE(t.has_value());
@@ -39,6 +40,7 @@ TEST(ActorTest, NextAvailableStartFullCapacity) {
   to::Actor a;
   a.capacity = 1;
   a.current_load = 1;
-  a.availability_windows = {{0, 1000}};
+  a.availability_windows = {{.start = 0, .end = 1000}};
   EXPECT_FALSE(a.next_available_start(0, 10).has_value());
 }
+}  // namespace

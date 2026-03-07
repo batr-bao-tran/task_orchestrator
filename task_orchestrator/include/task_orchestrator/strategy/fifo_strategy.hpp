@@ -10,7 +10,7 @@ namespace task_orchestrator {
 class FIFOStrategy : public SchedulingStrategy {
  public:
   void order_tasks(std::vector<TaskInfo>& tasks) const override {
-    std::sort(tasks.begin(), tasks.end(), [](const TaskInfo& a, const TaskInfo& b) {
+    std::ranges::sort(tasks, [](const TaskInfo& a, const TaskInfo& b) {
       if (a.phase_id != b.phase_id) {
         return a.phase_id < b.phase_id;
       }

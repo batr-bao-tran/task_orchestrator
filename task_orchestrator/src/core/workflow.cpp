@@ -49,9 +49,9 @@ std::vector<PhaseId> Workflow::ready_phases(const std::vector<PhaseId>& complete
   std::unordered_set<PhaseId> completed(completed_phase_ids.begin(), completed_phase_ids.end());
   std::vector<PhaseId> out;
   for (const auto& [id, p] : phases_) {
-    if (completed.count(id)) continue;
+    if (completed.contains(id)) continue;
     bool all_deps_done = std::ranges::all_of(p.dependency_phase_ids,
-                                             [&completed](const PhaseId& dep) { return completed.count(dep) != 0; });
+                                             [&completed](const PhaseId& dep) { return completed.contains(dep); });
     if (all_deps_done) {
       out.push_back(id);
     }

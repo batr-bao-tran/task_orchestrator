@@ -60,7 +60,7 @@ cc_test(
     srcs = ["sim_clock_test.cpp"],
     deps = [
         "//task_orchestrator",
-        "//task_orchestrator/utils",
+        "//utils",
         "@googletest//:gtest_main",
     ],
 )

@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+namespace {
 namespace to = task_orchestrator;
 
 TEST(PlannerFsmTest, InitialState) {
@@ -42,3 +43,4 @@ TEST(PlannerFsmTest, StateChangeCallback) {
   EXPECT_EQ(to::PlannerState::Planning, to);
   EXPECT_EQ(to::PlannerState::Idle, from);
 }
+}  // namespace

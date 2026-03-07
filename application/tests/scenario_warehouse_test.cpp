@@ -3,10 +3,11 @@
 #include "config/config.hpp"
 #include "runner/runner.hpp"
 
-using namespace task_orchestrator::app;
+namespace {
+namespace to = task_orchestrator;
 
 TEST(ScenarioWarehouseTest, SimpleThreeTasks) {
-  std::string yaml = R"(
+  const std::string content = R"(
 id: sc
 actors:
   - id: r1
@@ -34,35 +35,60 @@ tasks:
     deadline: 90
     allowed_actor_types: [robot]
 )";
-  WorkflowConfig cfg = load_config_from_string(yaml);
-  RunResult r = run(cfg);
-  EXPECT_TRUE(r.ok);
-  EXPECT_EQ(r.assignments.size(), 3u);
-  EXPECT_FALSE(r.capacity_issue);
+  const to::app::WorkflowConfig config = to::app::load_config_from_string(content);
+  const to::app::RunResult result = to::app::run(config);
+  EXPECT_TRUE(result.ok);
+  EXPECT_EQ(result.assignments.size(), 3U);
+  EXPECT_FALSE(result.capacity_issue);
 }
 
 TEST(ScenarioWarehouseTest, StressCapacityIssue) {
-  WorkflowConfig stress;
+  to::app::WorkflowConfig stress;
   stress.id = "stress";
-  stress.actors.push_back({"r1", "robot", 1, {{0, 100}}});
-  for (int i = 0; i < 5; ++i) stress.tasks.push_back({"t" + std::to_string(i), 0, 50, 50, {"robot"}});
-  RunResult r2 = run(stress);
-  EXPECT_TRUE(r2.ok);
-  EXPECT_TRUE(r2.capacity_issue);
-  EXPECT_GE(r2.unfulfilled_task_ids.size(), 1u);
-  EXPECT_LT(r2.assignments.size(), 5u);
+  stress.actors.push_back(
+      to::app::ActorConfig{.id = "r1", .type = "robot", .capacity = 1, .windows = {{.start = 0, .end = 100}}});
+  for (int i = 0; i < 5; ++i)
+    stress.tasks.push_back(to::app::TaskConfig{.id = "t" + std::to_string(i),
+                                               .requested_time = 0,
+                                               .duration = 50,
+                                               .deadline = 50,
+                                               .allowed_actor_types = {"robot"},
+                                               .phase_durations = {}});
+  const to::app::RunResult result = to::app::run(stress);
+  EXPECT_TRUE(result.ok);
+  EXPECT_TRUE(result.capacity_issue);
+  EXPECT_GE(result.unfulfilled_task_ids.size(), 1U);
+  EXPECT_LT(result.assignments.size(), 5U);
 }
 
 TEST(ScenarioWarehouseTest, MixedActors) {
-  WorkflowConfig mixed;
+  to::app::WorkflowConfig mixed;
   mixed.id = "mixed";
-  mixed.actors.push_back({"r1", "robot", 1, {{0, 200}}});
-  mixed.actors.push_back({"m1", "machine", 1, {{100, 300}}});
-  mixed.tasks.push_back({"j1", 0, 50, 150, {"robot"}});
-  mixed.tasks.push_back({"j2", 100, 50, 200, {"machine"}});
-  mixed.tasks.push_back({"j3", 50, 30, 180, {"robot", "machine"}});
-  RunResult r3 = run(mixed);
-  EXPECT_TRUE(r3.ok);
-  EXPECT_GE(r3.assignments.size(), 2u);
-  EXPECT_LE(r3.assignments.size(), 3u);
+  mixed.actors.push_back(
+      to::app::ActorConfig{.id = "r1", .type = "robot", .capacity = 1, .windows = {{.start = 0, .end = 200}}});
+  mixed.actors.push_back(
+      to::app::ActorConfig{.id = "m1", .type = "machine", .capacity = 1, .windows = {{.start = 100, .end = 300}}});
+  mixed.tasks.push_back(to::app::TaskConfig{.id = "j1",
+                                            .requested_time = 0,
+                                            .duration = 50,
+                                            .deadline = 150,
+                                            .allowed_actor_types = {"robot"},
+                                            .phase_durations = {}});
+  mixed.tasks.push_back(to::app::TaskConfig{.id = "j2",
+                                            .requested_time = 100,
+                                            .duration = 50,
+                                            .deadline = 200,
+                                            .allowed_actor_types = {"machine"},
+                                            .phase_durations = {}});
+  mixed.tasks.push_back(to::app::TaskConfig{.id = "j3",
+                                            .requested_time = 50,
+                                            .duration = 30,
+                                            .deadline = 180,
+                                            .allowed_actor_types = {"robot", "machine"},
+                                            .phase_durations = {}});
+  const to::app::RunResult result = to::app::run(mixed);
+  EXPECT_TRUE(result.ok);
+  EXPECT_GE(result.assignments.size(), 2U);
+  EXPECT_LE(result.assignments.size(), 3U);
 }
+}  // namespace

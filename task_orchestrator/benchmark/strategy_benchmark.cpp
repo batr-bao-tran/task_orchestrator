@@ -1,13 +1,14 @@
-// Benchmark: run each scheduling strategy on 10 complex scenarios with random
-// parametrization; report timing and fulfillment (assignment count).
-
+#include <array>
 #include <chrono>
+#include <climits>
 #include <cstdint>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <random>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "task_orchestrator/core/actor.hpp"
@@ -22,6 +23,8 @@
 
 namespace to = task_orchestrator;
 
+namespace {
+
 struct BenchResult {
   std::string scenario;
   std::string strategy;
@@ -30,7 +33,7 @@ struct BenchResult {
   bool ok = false;
 };
 
-static to::Workflow make_scenario_1(unsigned seed) {
+to::Workflow make_scenario_1(unsigned seed) {
   // Scenario 1: Single phase, many tasks, high contention.
   std::mt19937 rng(seed);
   int n_tasks = 20 + static_cast<int>(rng() % 31);  // 20–50
@@ -39,40 +42,43 @@ static to::Workflow make_scenario_1(unsigned seed) {
   for (int i = 0; i < n_tasks; ++i) {
     std::string pid = "P" + std::to_string(i);
     ph.process_ids.push_back(pid);
-    w.add_process(to::Process{pid,
-                              "p1",
-                              {},
-                              static_cast<to::Duration>(1 + (rng() % 10)),
-                              static_cast<to::Priority>(rng() % 100),
-                              std::optional<to::Time>{}});
+    w.add_process(to::Process{.id = pid,
+                              .phase_id = "p1",
+                              .sub_process_ids = {},
+                              .estimated_duration = static_cast<to::Duration>(1 + (rng() % 10)),
+                              .priority = static_cast<to::Priority>(rng() % 100),
+                              .deadline = std::optional<to::Time>{}});
   }
   w.add_phase(std::move(ph));
   return w;
 }
 
-static to::Workflow make_scenario_2(unsigned seed) {
+to::Workflow make_scenario_2(unsigned seed) {
   // Scenario 2: Multi-phase DAG, mixed priorities.
   std::mt19937 rng(seed);
   to::Workflow w("s2");
-  w.add_phase(to::Phase{"a", "A", {"A1", "A2"}, {}});
-  w.add_phase(to::Phase{"b", "B", {"B1", "B2", "B3"}, {"a"}});
-  w.add_phase(to::Phase{"c", "C", {"C1"}, {"a"}});
-  w.add_phase(to::Phase{"d", "D", {"D1"}, {"b", "c"}});
+  w.add_phase(to::Phase{.id = "a", .name = "A", .process_ids = {"A1", "A2"}, .dependency_phase_ids = {}});
+  w.add_phase(to::Phase{.id = "b", .name = "B", .process_ids = {"B1", "B2", "B3"}, .dependency_phase_ids = {"a"}});
+  w.add_phase(to::Phase{.id = "c", .name = "C", .process_ids = {"C1"}, .dependency_phase_ids = {"a"}});
+  w.add_phase(to::Phase{.id = "d", .name = "D", .process_ids = {"D1"}, .dependency_phase_ids = {"b", "c"}});
+  auto phase_id_for = [](char first) -> const char* {
+    if (first == 'A') return "a";
+    if (first == 'B') return "b";
+    if (first == 'C') return "c";
+    return "d";
+  };
   for (const char* id : {"A1", "A2", "B1", "B2", "B3", "C1", "D1"}) {
-    w.add_process(to::Process{id,
-                              id[0] == 'A'   ? "a"
-                              : id[0] == 'B' ? "b"
-                              : id[0] == 'C' ? "c"
-                                             : "d",
-                              {},
-                              static_cast<to::Duration>(1 + (rng() % 5)),
-                              static_cast<to::Priority>(rng() % 20),
-                              {}});
+    w.add_process(to::Process{.id = id,
+                              .phase_id = phase_id_for(id[0]),
+                              .sub_process_ids = {},
+                              .estimated_duration = static_cast<to::Duration>(1 + (rng() % 5)),
+                              .priority = static_cast<to::Priority>(rng() % 20),
+                              .deadline = {}});
   }
   return w;
 }
 
-static to::Workflow make_scenario_3(unsigned seed) {
+to::Workflow make_scenario_3(unsigned seed) {
   // Scenario 3: Many short tasks (throughput).
   std::mt19937 rng(seed);
   int n = 15 + static_cast<int>(rng() % 21);
@@ -81,36 +87,52 @@ static to::Workflow make_scenario_3(unsigned seed) {
   for (int i = 0; i < n; ++i) {
     std::string pid = "T" + std::to_string(i);
     ph.process_ids.push_back(pid);
-    w.add_process(to::Process{pid, "p", {}, 1, 0, {}});
+    w.add_process(to::Process{
+        .id = pid, .phase_id = "p", .sub_process_ids = {}, .estimated_duration = 1, .priority = 0, .deadline = {}});
   }
   w.add_phase(std::move(ph));
   return w;
 }
 
-static to::Workflow make_scenario_4(unsigned seed) {
+to::Workflow make_scenario_4(unsigned seed) {
   // Scenario 4: Long tasks with deadlines.
   std::mt19937 rng(seed);
   to::Workflow w("s4");
-  w.add_phase(to::Phase{"ph", "Ph", {"L1", "L2", "L3", "L4"}, {}});
+  w.add_phase(to::Phase{.id = "ph", .name = "Ph", .process_ids = {"L1", "L2", "L3", "L4"}, .dependency_phase_ids = {}});
   to::Time base = 100;
   for (const char* id : {"L1", "L2", "L3", "L4"}) {
     to::Duration d = 10 + (rng() % 41);
-    w.add_process(to::Process{id, "ph", {}, d, static_cast<to::Priority>(rng() % 5), base + d + (rng() % 50)});
+    w.add_process(to::Process{.id = id,
+                              .phase_id = "ph",
+                              .sub_process_ids = {},
+                              .estimated_duration = d,
+                              .priority = static_cast<to::Priority>(rng() % 5),
+                              .deadline = base + d + (rng() % 50)});
   }
   return w;
 }
 
-static to::Workflow make_scenario_5(unsigned seed) {
+to::Workflow make_scenario_5(unsigned seed) {
   // Scenario 5: Subprocess-heavy (process with sub_process_ids).
   std::mt19937 rng(seed);
   to::Workflow w("s5");
-  w.add_phase(to::Phase{"ph", "Ph", {"M1", "M2"}, {}});
-  w.add_process(to::Process{"M1", "ph", {"M1a", "M1b"}, 2, 1, {}});
-  w.add_process(to::Process{"M2", "ph", {"M2a"}, 1, 2, {}});
+  w.add_phase(to::Phase{.id = "ph", .name = "Ph", .process_ids = {"M1", "M2"}, .dependency_phase_ids = {}});
+  w.add_process(to::Process{.id = "M1",
+                            .phase_id = "ph",
+                            .sub_process_ids = {"M1a", "M1b"},
+                            .estimated_duration = 2,
+                            .priority = 1,
+                            .deadline = {}});
+  w.add_process(to::Process{.id = "M2",
+                            .phase_id = "ph",
+                            .sub_process_ids = {"M2a"},
+                            .estimated_duration = 1,
+                            .priority = 2,
+                            .deadline = {}});
   return w;
 }
 
-static to::Workflow make_scenario_6(unsigned seed) {
+to::Workflow make_scenario_6(unsigned seed) {
   // Scenario 6: Random priorities and durations.
   std::mt19937 rng(seed);
   int n = 10 + static_cast<int>(rng() % 16);
@@ -119,18 +141,18 @@ static to::Workflow make_scenario_6(unsigned seed) {
   for (int i = 0; i < n; ++i) {
     std::string pid = "R" + std::to_string(i);
     ph.process_ids.push_back(pid);
-    w.add_process(to::Process{pid,
-                              "p",
-                              {},
-                              static_cast<to::Duration>(1 + (rng() % 20)),
-                              static_cast<to::Priority>(rng() % 50),
-                              rng() % 2 ? std::optional<to::Time>(100 + (rng() % 200)) : std::nullopt});
+    w.add_process(to::Process{.id = pid,
+                              .phase_id = "p",
+                              .sub_process_ids = {},
+                              .estimated_duration = static_cast<to::Duration>(1 + (rng() % 20)),
+                              .priority = static_cast<to::Priority>(rng() % 50),
+                              .deadline = rng() % 2 ? std::optional<to::Time>(100 + (rng() % 200)) : std::nullopt});
   }
   w.add_phase(std::move(ph));
   return w;
 }
 
-static to::Workflow make_scenario_7(unsigned seed) {
+to::Workflow make_scenario_7(unsigned seed) {
   // Scenario 7: Linear chain of phases.
   std::mt19937 rng(seed);
   int depth = 3 + static_cast<int>(rng() % 4);
@@ -142,44 +164,59 @@ static to::Workflow make_scenario_7(unsigned seed) {
     if (!prev.empty()) deps.push_back(prev);
     std::string p1 = "P" + std::to_string(d) + "a";
     std::string p2 = "P" + std::to_string(d) + "b";
-    w.add_phase(to::Phase{ph_id, ph_id, {p1, p2}, deps});
-    w.add_process(to::Process{p1, ph_id, {}, static_cast<to::Duration>(1 + (rng() % 3)), 0, {}});
-    w.add_process(to::Process{p2, ph_id, {}, static_cast<to::Duration>(1 + (rng() % 3)), 0, {}});
+    w.add_phase(to::Phase{.id = ph_id, .name = ph_id, .process_ids = {p1, p2}, .dependency_phase_ids = deps});
+    w.add_process(to::Process{.id = p1,
+                              .phase_id = ph_id,
+                              .sub_process_ids = {},
+                              .estimated_duration = static_cast<to::Duration>(1 + (rng() % 3)),
+                              .priority = 0,
+                              .deadline = {}});
+    w.add_process(to::Process{.id = p2,
+                              .phase_id = ph_id,
+                              .sub_process_ids = {},
+                              .estimated_duration = static_cast<to::Duration>(1 + (rng() % 3)),
+                              .priority = 0,
+                              .deadline = {}});
     prev = ph_id;
   }
   return w;
 }
 
-static to::Workflow make_scenario_8(unsigned seed) {
+to::Workflow make_scenario_8(unsigned seed) {
   // Scenario 8: Many tasks, mixed process counts.
   std::mt19937 rng(seed);
   to::Workflow w("s8");
-  w.add_phase(to::Phase{"ph", "Ph", {"A", "B", "C", "D", "E"}, {}});
+  w.add_phase(
+      to::Phase{.id = "ph", .name = "Ph", .process_ids = {"A", "B", "C", "D", "E"}, .dependency_phase_ids = {}});
   for (const char* id : {"A", "B", "C", "D", "E"}) {
-    w.add_process(to::Process{
-        id, "ph", {}, static_cast<to::Duration>(5 + (rng() % 15)), static_cast<to::Priority>(rng() % 10), {}});
+    w.add_process(to::Process{.id = id,
+                              .phase_id = "ph",
+                              .sub_process_ids = {},
+                              .estimated_duration = static_cast<to::Duration>(5 + (rng() % 15)),
+                              .priority = static_cast<to::Priority>(rng() % 10),
+                              .deadline = {}});
   }
   return w;
 }
 
-static to::Workflow make_scenario_9(unsigned seed) {
+to::Workflow make_scenario_9(unsigned seed) {
   // Scenario 9: Two phases with dependency.
   std::mt19937 rng(seed);
   to::Workflow w("s9");
-  w.add_phase(to::Phase{"ph1", "Phase1", {"X1", "X2", "X3"}, {}});
-  w.add_phase(to::Phase{"ph2", "Phase2", {"Y1", "Y2"}, {"ph1"}});
+  w.add_phase(to::Phase{.id = "ph1", .name = "Phase1", .process_ids = {"X1", "X2", "X3"}, .dependency_phase_ids = {}});
+  w.add_phase(to::Phase{.id = "ph2", .name = "Phase2", .process_ids = {"Y1", "Y2"}, .dependency_phase_ids = {"ph1"}});
   for (const char* id : {"X1", "X2", "X3", "Y1", "Y2"}) {
-    w.add_process(to::Process{id,
-                              id[0] == 'X' ? "ph1" : "ph2",
-                              {},
-                              static_cast<to::Duration>(1 + (rng() % 5)),
-                              static_cast<to::Priority>(rng() % 5),
-                              {}});
+    w.add_process(to::Process{.id = id,
+                              .phase_id = id[0] == 'X' ? "ph1" : "ph2",
+                              .sub_process_ids = {},
+                              .estimated_duration = static_cast<to::Duration>(1 + (rng() % 5)),
+                              .priority = static_cast<to::Priority>(rng() % 5),
+                              .deadline = {}});
   }
   return w;
 }
 
-static to::Workflow make_scenario_10(unsigned seed) {
+to::Workflow make_scenario_10(unsigned seed) {
   // Scenario 10: Large workflow (many phases, many tasks).
   std::mt19937 rng(seed);
   to::Workflow w("s10");
@@ -195,85 +232,99 @@ static to::Workflow make_scenario_10(unsigned seed) {
     for (int j = 0; j < n_proc; ++j) {
       std::string pid = "P" + std::to_string(i) + "_" + std::to_string(j);
       pids.push_back(pid);
-      w.add_process(to::Process{
-          pid, ph_id, {}, static_cast<to::Duration>(1 + (rng() % 4)), static_cast<to::Priority>(rng() % 10), {}});
+      w.add_process(to::Process{.id = pid,
+                                .phase_id = ph_id,
+                                .sub_process_ids = {},
+                                .estimated_duration = static_cast<to::Duration>(1 + (rng() % 4)),
+                                .priority = static_cast<to::Priority>(rng() % 10),
+                                .deadline = {}});
     }
-    w.add_phase(to::Phase{ph_id, ph_id, pids, deps});
+    w.add_phase(to::Phase{.id = ph_id, .name = ph_id, .process_ids = pids, .dependency_phase_ids = deps});
   }
   return w;
 }
 
 using ScenarioBuilder = to::Workflow (*)(unsigned);
-static const struct {
+struct ScenarioEntry {
   const char* name;
   ScenarioBuilder build;
-} kScenarios[] = {
-    {"single_phase_many_tasks", make_scenario_1},
-    {"multi_phase_dag", make_scenario_2},
-    {"many_short_tasks", make_scenario_3},
-    {"long_tasks_deadlines", make_scenario_4},
-    {"subprocess_heavy", make_scenario_5},
-    {"random_prio_duration", make_scenario_6},
-    {"linear_chain", make_scenario_7},
-    {"mixed_process_counts", make_scenario_8},
-    {"two_phase_dep", make_scenario_9},
-    {"large_workflow", make_scenario_10},
 };
+const std::array<ScenarioEntry, 10> kScenarios = {{
+    {.name = "single_phase_many_tasks", .build = make_scenario_1},
+    {.name = "multi_phase_dag", .build = make_scenario_2},
+    {.name = "many_short_tasks", .build = make_scenario_3},
+    {.name = "long_tasks_deadlines", .build = make_scenario_4},
+    {.name = "subprocess_heavy", .build = make_scenario_5},
+    {.name = "random_prio_duration", .build = make_scenario_6},
+    {.name = "linear_chain", .build = make_scenario_7},
+    {.name = "mixed_process_counts", .build = make_scenario_8},
+    {.name = "two_phase_dep", .build = make_scenario_9},
+    {.name = "large_workflow", .build = make_scenario_10},
+}};
 
-static to::ActorRegistry make_registry_for_workflow(const to::Workflow& w, unsigned seed) {
+to::ActorRegistry make_registry_for_workflow(unsigned seed) {
   std::mt19937 rng(seed);
   int n_actors = 2 + static_cast<int>(rng() % 5);
   to::ActorRegistry reg;
   for (int i = 0; i < n_actors; ++i) {
     std::string aid = "A" + std::to_string(i);
     int cap = 1 + static_cast<int>(rng() % 4);
-    reg.add(to::Actor{aid, cap, {{0, 10000}}, 0});
+    reg.add(
+        to::Actor{.id = aid, .capacity = cap, .availability_windows = {{.start = 0, .end = 10000}}, .current_load = 0});
   }
   return reg;
 }
 
-static void run_one(BenchResult& out,
-                    const to::Workflow& w,
-                    const to::WorkflowState& state,
-                    const to::ActorRegistry& reg,
-                    const to::SchedulingStrategy* strategy,
-                    const char* strategy_name,
-                    const char* scenario_name) {
-  to::Scheduler sched;
+void run_one(BenchResult& out,
+             const to::Workflow& w,
+             const to::WorkflowState& state,
+             const to::ActorRegistry& reg,
+             const to::SchedulingStrategy* strategy,
+             const char* strategy_name,
+             const char* scenario_name) {
   out.scenario = scenario_name;
   out.strategy = strategy_name;
   auto start = std::chrono::steady_clock::now();
-  to::ScheduleResult result = sched.plan(w, state, reg, 0, strategy);
+  const to::ScheduleResult result = to::Scheduler::plan(w, state, reg, 0, strategy);
   auto end = std::chrono::steady_clock::now();
   out.ns = static_cast<int64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count());
   out.assignments = result.assignments.size();
   out.ok = result.ok;
 }
 
+}  // namespace
+
 int main(int argc, char** argv) {
-  unsigned seed = 12345;
+  uint64_t seed = 12345U;
   if (argc >= 2) {
-    seed = static_cast<unsigned>(std::atoi(argv[1]));
+    char* end = nullptr;
+    const auto v = std::strtoul(argv[1], &end, 10);
+    if (end != argv[1] && *end == '\0' && v <= UINT_MAX) {
+      seed = v;
+    }
   }
   const int runs_per_case = 5;
 
-  to::EDFStrategy edf;
-  to::FIFOStrategy fifo;
-  to::SJFStrategy sjf;
-  to::PriorityOnlyStrategy prio;
+  const to::EDFStrategy edf;
+  const to::FIFOStrategy fifo;
+  const to::SJFStrategy sjf;
+  const to::PriorityOnlyStrategy prio;
   struct Named {
     const char* name;
     const to::SchedulingStrategy* s;
   };
-  Named strategies[] = {{"EDF", &edf}, {"FIFO", &fifo}, {"SJF", &sjf}, {"PriorityOnly", &prio}};
+  const std::array<Named, 4> strategies = {Named{.name = "EDF", .s = &edf},
+                                           Named{.name = "FIFO", .s = &fifo},
+                                           Named{.name = "SJF", .s = &sjf},
+                                           Named{.name = "PriorityOnly", .s = &prio}};
 
   std::vector<BenchResult> results;
 
   for (const auto& sc : kScenarios) {
     for (int r = 0; r < runs_per_case; ++r) {
-      unsigned run_seed = seed + 1000 * static_cast<unsigned>(r);
+      unsigned run_seed = seed + (1000 * static_cast<unsigned>(r));
       to::Workflow w = sc.build(run_seed);
-      to::ActorRegistry reg = make_registry_for_workflow(w, run_seed + 1);
+      to::ActorRegistry reg = make_registry_for_workflow(run_seed + 1);
       to::WorkflowState state;
 
       for (const auto& st : strategies) {

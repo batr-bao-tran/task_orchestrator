@@ -11,6 +11,7 @@ cc_library(
     ],
     deps = [
         "//task_orchestrator",
+        "//utils",
         "@yaml-cpp//:yaml-cpp",
     ],
 )

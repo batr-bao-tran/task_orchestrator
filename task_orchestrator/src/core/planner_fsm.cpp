@@ -18,23 +18,23 @@ struct Planning : msm::front::state<> {};
 struct Dispatching : msm::front::state<> {};
 struct Running : msm::front::state<> {};
 
-struct planner_fsm_def : msm::front::state_machine_def<planner_fsm_def> {
+struct PlannerFsmDef : msm::front::state_machine_def<PlannerFsmDef> {
   using initial_state = Idle;
 
-  typedef mpl::vector<msm::front::Row<Idle, StartPlanning, Planning, msm::front::none, msm::front::none>,
-                      msm::front::Row<Planning, ScheduleReady, Dispatching, msm::front::none, msm::front::none>,
-                      msm::front::Row<Dispatching, DispatchComplete, Running, msm::front::none, msm::front::none>,
-                      msm::front::Row<Running, PhaseComplete, Running, msm::front::none, msm::front::none>,
-                      msm::front::Row<Running, AllPhasesComplete, Idle, msm::front::none, msm::front::none>,
-                      msm::front::Row<Planning, PhaseComplete, Running, msm::front::none, msm::front::none>,
-                      msm::front::Row<Dispatching, PhaseComplete, Running, msm::front::none, msm::front::none>,
-                      msm::front::Row<Planning, Tick, Planning, msm::front::none, msm::front::none>,
-                      msm::front::Row<Idle, Tick, Idle, msm::front::none, msm::front::none>,
-                      msm::front::Row<Running, Tick, Running, msm::front::none, msm::front::none>>
-      transition_table;
+  using transition_table =
+      mpl::vector<msm::front::Row<Idle, StartPlanning, Planning, msm::front::none, msm::front::none>,
+                  msm::front::Row<Planning, ScheduleReady, Dispatching, msm::front::none, msm::front::none>,
+                  msm::front::Row<Dispatching, DispatchComplete, Running, msm::front::none, msm::front::none>,
+                  msm::front::Row<Running, PhaseComplete, Running, msm::front::none, msm::front::none>,
+                  msm::front::Row<Running, AllPhasesComplete, Idle, msm::front::none, msm::front::none>,
+                  msm::front::Row<Planning, PhaseComplete, Running, msm::front::none, msm::front::none>,
+                  msm::front::Row<Dispatching, PhaseComplete, Running, msm::front::none, msm::front::none>,
+                  msm::front::Row<Planning, Tick, Planning, msm::front::none, msm::front::none>,
+                  msm::front::Row<Idle, Tick, Idle, msm::front::none, msm::front::none>,
+                  msm::front::Row<Running, Tick, Running, msm::front::none, msm::front::none>>;
 };
 
-typedef msm::back::state_machine<planner_fsm_def> planner_fsm_backend;
+using planner_fsm_backend = msm::back::state_machine<PlannerFsmDef>;
 
 }  // namespace
 

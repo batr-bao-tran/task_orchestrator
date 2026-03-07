@@ -14,12 +14,12 @@
 
 namespace task_orchestrator::app {
 
-using namespace task_orchestrator;
-
-static bool actor_type_matches(const std::string& actor_type, const std::vector<std::string>& allowed) {
+namespace {
+bool actor_type_matches(const std::string& actor_type, const std::vector<std::string>& allowed) {
   if (allowed.empty()) return true;
   return std::ranges::find(allowed, actor_type) != allowed.end();
 }
+}  // namespace
 
 RunResult run(const WorkflowConfig& config) {
   RunResult result;
@@ -28,7 +28,7 @@ RunResult run(const WorkflowConfig& config) {
   std::unordered_map<std::string, std::string> actor_id_to_type;
 
   for (const TaskConfig& t : config.tasks) {
-    w.add_phase(Phase{t.id, t.id, {t.id}, {}});
+    w.add_phase(Phase{.id = t.id, .name = t.id, .process_ids = {t.id}, .dependency_phase_ids = {}});
     Process proc;
     proc.id = t.id;
     proc.phase_id = t.id;
@@ -45,14 +45,13 @@ RunResult run(const WorkflowConfig& config) {
     actor.capacity = a.capacity;
     actor.current_load = 0;
     for (const auto& ww : a.windows) {
-      actor.availability_windows.push_back({ww.start, ww.end});
+      actor.availability_windows.push_back({.start = ww.start, .end = ww.end});
     }
     reg.add(std::move(actor));
   }
 
   WorkflowState state;
-  Scheduler sched;
-  ScheduleResult plan_result = sched.plan(w, state, reg, 0);
+  ScheduleResult plan_result = task_orchestrator::Scheduler::plan(w, state, reg, 0);
 
   result.ok = plan_result.ok;
 
@@ -77,7 +76,7 @@ RunResult run(const WorkflowConfig& config) {
   }
 
   for (const TaskConfig& t : config.tasks) {
-    if (assigned.count(t.id) == 0) {
+    if (!assigned.contains(t.id)) {
       result.unfulfilled_task_ids.push_back(t.id);
       result.capacity_issue = true;
     }

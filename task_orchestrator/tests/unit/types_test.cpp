@@ -1,11 +1,12 @@
-#include "task_orchestrator/data/types.hpp"
+#include "utils/types.hpp"
 
 #include <gtest/gtest.h>
 
+namespace {
 namespace to = task_orchestrator;
 
 TEST(TypesTest, AvailabilityWindowContains) {
-  to::AvailabilityWindow w{100, 200};
+  to::AvailabilityWindow w{.start = 100, .end = 200};
   EXPECT_TRUE(w.contains(100));
   EXPECT_TRUE(w.contains(150));
   EXPECT_TRUE(w.contains(199));
@@ -14,7 +15,7 @@ TEST(TypesTest, AvailabilityWindowContains) {
 }
 
 TEST(TypesTest, AvailabilityWindowOverlaps) {
-  to::AvailabilityWindow w{100, 200};
+  to::AvailabilityWindow w{.start = 100, .end = 200};
   EXPECT_TRUE(w.overlaps(50, 150));
   EXPECT_TRUE(w.overlaps(150, 250));
   EXPECT_TRUE(w.overlaps(100, 200));
@@ -22,3 +23,4 @@ TEST(TypesTest, AvailabilityWindowOverlaps) {
   EXPECT_FALSE(w.overlaps(50, 100));
   EXPECT_FALSE(w.overlaps(200, 250));
 }
+}  // namespace

@@ -1,10 +1,10 @@
-#ifndef TASK_ORCHESTRATOR__TASK_ORCHESTRATOR_UTILS_INCLUDE_TASK_ORCHESTRATOR_UTILS__SIM_CLOCK_HPP_
-#define TASK_ORCHESTRATOR__TASK_ORCHESTRATOR_UTILS_INCLUDE_TASK_ORCHESTRATOR_UTILS__SIM_CLOCK_HPP_
+#ifndef TASK_ORCHESTRATOR__UTILS_INCLUDE_UTILS__SIM_CLOCK_HPP_
+#define TASK_ORCHESTRATOR__UTILS_INCLUDE_UTILS__SIM_CLOCK_HPP_
 #include <functional>
 #include <queue>
 #include <vector>
 
-#include "task_orchestrator/data/types.hpp"
+#include "utils/types.hpp"
 
 namespace task_orchestrator {
 
@@ -14,7 +14,7 @@ class SimClock {
   using Time = task_orchestrator::Time;
   using EventCallback = std::function<void(Time)>;
 
-  SimClock() : now_(0) {}
+  SimClock() = default;
 
   Time current_time() const { return now_; }
   void set_time(Time t) { now_ = t; }
@@ -36,13 +36,13 @@ class SimClock {
   }
 
  private:
-  Time now_;
+  Time now_{0};
   struct Event {
     Time at;
     EventCallback cb;
     bool operator>(const Event& o) const { return at > o.at; }
   };
-  std::priority_queue<Event, std::vector<Event>, std::greater<Event>> queue_;
+  std::priority_queue<Event, std::vector<Event>, std::greater<>> queue_;
 };
 
 }  // namespace task_orchestrator

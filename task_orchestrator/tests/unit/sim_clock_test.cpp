@@ -1,9 +1,10 @@
-#include "task_orchestrator/utils/sim_clock.hpp"
+#include "utils/sim_clock.hpp"
 
 #include <gtest/gtest.h>
 
 #include <vector>
 
+namespace {
 namespace to = task_orchestrator;
 
 TEST(SimClockTest, AdvanceToNext) {
@@ -17,12 +18,12 @@ TEST(SimClockTest, AdvanceToNext) {
 
   to::SimClock::Time t1 = clock.advance_to_next();
   EXPECT_EQ(t1, 5);
-  ASSERT_EQ(seen.size(), 1u);
+  ASSERT_EQ(seen.size(), 1U);
   EXPECT_EQ(seen[0], 5);
 
   to::SimClock::Time t2 = clock.advance_to_next();
   EXPECT_EQ(t2, 10);
-  EXPECT_EQ(seen.size(), 2u);
+  EXPECT_EQ(seen.size(), 2U);
   EXPECT_FALSE(clock.has_pending_events());
 }
 
@@ -35,3 +36,4 @@ TEST(SimClockTest, RunUntil) {
   to::SimClock::Time end = clock.run_until(10);
   EXPECT_EQ(end, 2);
 }
+}  // namespace

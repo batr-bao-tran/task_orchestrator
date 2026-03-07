@@ -3,7 +3,7 @@
 #include <optional>
 #include <vector>
 
-#include "task_orchestrator/data/types.hpp"
+#include "utils/types.hpp"
 
 namespace task_orchestrator {
 

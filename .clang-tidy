@@ -1,9 +1,9 @@
 # https://github.com/googleapis/google-cloud-cpp/blob/main/.clang-tidy
+
 Checks: >
   -*,
   abseil-*,
   bugprone-*,
-  google-*,
   misc-*,
   modernize-*,
   performance-*,
@@ -19,7 +19,6 @@ Checks: >
   -modernize-use-trailing-return-type,
   -modernize-concat-nested-namespaces,
   -modernize-use-nodiscard,
-  -modernize-avoid-c-arrays,
   -performance-move-const-arg,
   -performance-avoid-endl,
   -performance-enum-size,
@@ -36,24 +35,30 @@ Checks: >
   -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-unchecked-optional-access,
   -bugprone-unused-local-non-trivial-variable,
-  -bugprone-unused-return-value
+  -bugprone-reserved-identifier,
+  -bugprone-throwing-static-initialization,
+  -bugprone-macro-parentheses
 
 # Turn all the warnings from the checks above into errors.
 WarningsAsErrors: "*"
+
+# Exclude only build artifacts and external deps
+HeaderFilterRegex: .*
+ExcludeHeaderFilterRegex: '.*(bazel-out|bazel-bin|third_party/|external/).*'
 
 CheckOptions:
   - { key: readability-identifier-naming.NamespaceCase,          value: lower_case }
   - { key: readability-identifier-naming.ClassCase,              value: CamelCase  }
   - { key: readability-identifier-naming.StructCase,             value: CamelCase  }
   - { key: readability-identifier-naming.TemplateParameterCase,  value: CamelCase  }
-  - { key: readability-identifier-naming.FunctionCase,           value: CamelCase  }
+  - { key: readability-identifier-naming.FunctionCase,           value: lower_case }
   - { key: readability-identifier-naming.VariableCase,           value: lower_case }
   - { key: readability-identifier-naming.ClassMemberCase,        value: lower_case }
   - { key: readability-identifier-naming.ClassMemberSuffix,      value: _          }
   - { key: readability-identifier-naming.PrivateMemberSuffix,    value: _          }
   - { key: readability-identifier-naming.ProtectedMemberSuffix,  value: _          }
   - { key: readability-identifier-naming.EnumConstantCase,         value: CamelCase }
-  - { key: readability-identifier-naming.EnumConstantPrefix,       value: k         }
+  - { key: readability-identifier-naming.EnumConstantPrefix,       value: ''        }
   - { key: readability-identifier-naming.ConstexprVariableCase,    value: CamelCase }
   - { key: readability-identifier-naming.ConstexprVariablePrefix,  value: k         }
   - { key: readability-identifier-naming.GlobalConstantCase,       value: CamelCase }
@@ -62,5 +67,6 @@ CheckOptions:
   - { key: readability-identifier-naming.MemberConstantPrefix,     value: k         }
   - { key: readability-identifier-naming.StaticConstantCase,       value: CamelCase }
   - { key: readability-identifier-naming.StaticConstantPrefix,     value: k         }
+  - { key: readability-identifier-naming.LocalConstantCase,       value: lower_case }
   - { key: readability-implicit-bool-conversion.AllowIntegerConditions,  value: 1   }
   - { key: readability-implicit-bool-conversion.AllowPointerConditions,  value: 1   }

@@ -44,6 +44,8 @@ coverage/
 .coverage
 htmlcov/
 
+compile_commands.json
+
 # Misc
 *.log
 *.tmp

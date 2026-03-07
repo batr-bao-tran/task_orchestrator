@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <optional>
 
-#include "task_orchestrator/data/types.hpp"
+#include "utils/types.hpp"
 
 namespace task_orchestrator {
 
@@ -12,12 +12,7 @@ bool Actor::can_accept_at(Time t, Duration duration) const {
     return false;
   }
   Time end = t + duration;
-  for (const auto& w : availability_windows) {
-    if (w.contains(t) && end <= w.end) {
-      return true;
-    }
-  }
-  return false;
+  return std::ranges::any_of(availability_windows, [t, end](const auto& w) { return w.contains(t) && end <= w.end; });
 }
 
 std::optional<Time> Actor::next_available_start(Time t, Duration duration) const {
@@ -28,9 +23,7 @@ std::optional<Time> Actor::next_available_start(Time t, Duration duration) const
   std::vector<AvailabilityWindow> sorted(availability_windows.begin(), availability_windows.end());
   std::ranges::sort(sorted, {}, &AvailabilityWindow::start);
   for (const auto& window : sorted) {
-    if (candidate < window.start) {
-      candidate = window.start;
-    }
+    candidate = std::max(candidate, window.start);
     if (candidate + duration <= window.end) {
       return candidate;
     }

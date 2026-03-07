@@ -5,7 +5,7 @@
 
 #include "task_orchestrator/data/phase.hpp"
 #include "task_orchestrator/data/process.hpp"
-#include "task_orchestrator/data/types.hpp"
+#include "utils/types.hpp"
 
 namespace task_orchestrator {
 
@@ -14,7 +14,7 @@ class Workflow {
   Workflow() = default;
   explicit Workflow(WorkflowId id) : id_(std::move(id)) {}
 
-  void set_id(WorkflowId id) { id_ = id; }
+  void set_id(const WorkflowId& id) { id_ = id; }
   const WorkflowId& id() const { return id_; }
 
   void add_phase(Phase p);

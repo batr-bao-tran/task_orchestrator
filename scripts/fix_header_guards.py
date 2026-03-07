@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """
-Auto-fix header guards to <PROJECT_NAME>__<PATH_TO_FILE>__<FILE_NAME>_.
-e.g. task_orchestrator/include/task_orchestrator/orchestrator.hpp
-  -> TASK_ORCHESTRATOR__TASK_ORCHESTRATOR_INCLUDE_TASK_ORCHESTRATOR__ORCHESTRATOR_HPP_
+Auto-fix header guards to PROJECT__PATH__FILE_.
 """
 from pathlib import Path
 import re
@@ -23,7 +21,7 @@ def file_to_guard_part(filename: str) -> str:
 
 
 def compute_guard(relative_path: str) -> str:
-    """Full guard: PROJECT_NAME__PATH__FILE_."""
+    """Full guard: PROJECT__PATH__FILE_ (double underscore between project, path, and file)."""
     p = Path(relative_path)
     path_part = path_to_guard_part(str(p.parent))
     file_part = file_to_guard_part(p.name)
@@ -36,7 +34,9 @@ def fix_file(filepath: Path, root: Path) -> str | None:
     rel = str(filepath.relative_to(root))
     new_guard = compute_guard(rel)
 
-    ifndef_pat = re.compile(r"#ifndef\s+(\S+)\s*\n#define\s+\S+\s*\n", re.MULTILINE)
+    ifndef_pat = re.compile(
+        r"#ifndef\s+(\S+)\s*\n#define\s+\S+\s*\n", re.MULTILINE
+    )
     match = ifndef_pat.search(text)
     if not match:
         return None

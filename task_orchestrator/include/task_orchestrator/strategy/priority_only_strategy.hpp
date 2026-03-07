@@ -10,7 +10,7 @@ namespace task_orchestrator {
 class PriorityOnlyStrategy : public SchedulingStrategy {
  public:
   void order_tasks(std::vector<TaskInfo>& tasks) const override {
-    std::sort(tasks.begin(), tasks.end(), [](const TaskInfo& a, const TaskInfo& b) {
+    std::ranges::sort(tasks, [](const TaskInfo& a, const TaskInfo& b) {
       if (a.priority != b.priority) {
         return a.priority > b.priority;
       }

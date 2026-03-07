@@ -1,6 +1,5 @@
 #ifndef TASK_ORCHESTRATOR__APPLICATION_RUNNER_INCLUDE_RUNNER__RUN_RESULT_HPP_
 #define TASK_ORCHESTRATOR__APPLICATION_RUNNER_INCLUDE_RUNNER__RUN_RESULT_HPP_
-#include <string>
 #include <vector>
 
 #include "task_orchestrator/core/scheduler.hpp"

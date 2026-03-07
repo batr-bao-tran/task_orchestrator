@@ -1,16 +1,18 @@
-#include "task_orchestrator/utils/sim_clock.hpp"
+#include "utils/sim_clock.hpp"
+
+#include <algorithm>
 
 namespace task_orchestrator {
 
-void SimClock::schedule_at(Time t, EventCallback cb) { queue_.push(Event{t, std::move(cb)}); }
+void SimClock::schedule_at(Time t, EventCallback cb) { queue_.push(Event{.at = t, .cb = std::move(cb)}); }
 
 SimClock::Time SimClock::advance_to_next() {
   if (queue_.empty()) return now_;
-  Event e = queue_.top();
+  Event event = queue_.top();
   queue_.pop();
-  now_ = e.at;
-  if (e.cb) {
-    e.cb(now_);
+  now_ = event.at;
+  if (event.cb) {
+    event.cb(now_);
   }
   return now_;
 }
@@ -19,9 +21,7 @@ SimClock::Time SimClock::run_until(Time time_limit) {
   while (!queue_.empty() && queue_.top().at <= time_limit) {
     advance_to_next();
   }
-  if (now_ > time_limit) {
-    now_ = time_limit;
-  }
+  now_ = std::min(now_, time_limit);
   return now_;
 }
 
