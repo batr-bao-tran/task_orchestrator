@@ -66,7 +66,8 @@ Build the library:
 bazel build //task_orchestrator:task_orchestrator
 ```
 
-If you see `cannot find 'ld'`, install a full C++ toolchain (e.g. `build-essential` on Debian/Ubuntu). On Linux you can use the LLVM linker for faster builds: `sudo apt-get install lld` then `bazel build --config=lld //task_orchestrator:task_orchestrator`.
+- **Linux:** If you see `cannot find 'ld'`, install a full C++ toolchain (e.g. `build-essential` on Debian/Ubuntu). For faster linking use the LLVM linker: `sudo apt-get install lld` then `bazel build --config=linux //task_orchestrator:task_orchestrator`.
+- **macOS:** Ensure Xcode Command Line Tools are installed (`xcode-select --install`) and selected. Use the default build (no config); do not use `--config=linux` or `--config=gold` (those linkers are Linux-only).
 
 Build the application layer with examples:
 

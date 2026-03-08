@@ -13,13 +13,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             platform: linux_amd64
-          - os: macos-14
+          - os: macos-15
             platform: macos_arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install lld (Linux)
+        if: matrix.os == 'ubuntu-24.04'
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - name: Set up Xcode (macOS)
+        if: matrix.os == 'macos-15'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
 
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
@@ -27,10 +37,20 @@ jobs:
           bazel_version: "9.0.0"
 
       - name: Build
-        run: bazel build //task_orchestrator:task_orchestrator
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-24.04" ]; then
+            bazel build --config=linux //task_orchestrator:task_orchestrator
+          else
+            bazel build --config=darwin //task_orchestrator:task_orchestrator
+          fi
 
       - name: Test
-        run: bazel test //tests/unit:all //tests/scenario:all --test_output=errors
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-24.04" ]; then
+            bazel test --config=linux //... --test_output=errors
+          else
+            bazel test --config=darwin //... --test_output=errors
+          fi
 
       - name: Prepare package
         id: pkg
@@ -45,8 +65,8 @@ jobs:
             cp "$LIBDIR" "$PKGDIR/lib/"
           fi
           tar czf "${PKGDIR}.tar.gz" "$PKGDIR"
-          echo "package=${PKGDIR}.tar.gz" >> $GITHUB_OUTPUT
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "package=${PKGDIR}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -58,7 +78,7 @@ jobs:
   upload-release-assets:
     needs: package
     if: github.event_name == 'release'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
         with:

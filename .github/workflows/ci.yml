@@ -1,4 +1,4 @@
-# CI: build and test on push/PR (lld installed for linking)
+# CI: build first, then test and lint
 name: CI
 
 on:
@@ -8,57 +8,95 @@ on:
     branches: [main]
 
 jobs:
-  build-and-test:
+  build:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-14]
+        os: [ubuntu-22.04, ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install lld (Linux)
-        if: matrix.os == 'ubuntu-22.04'
+        if: matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-24.04'
         run: sudo apt-get update && sudo apt-get install -y lld
+
+      - name: Set up Xcode (macOS)
+        if: matrix.os == 'macos-15'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
 
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
         with:
           bazel_version: "9.0.0"
 
-      - name: Build (lld on Linux only)
+      - name: Build
         run: |
-          if [ "${{ matrix.os }}" = "ubuntu-22.04" ]; then
-            bazel build --config=lld //task_orchestrator:task_orchestrator //application/...
+          if [ "${{ matrix.os }}" = "ubuntu-22.04" ] || [ "${{ matrix.os }}" = "ubuntu-24.04" ]; then
+            bazel build --config=linux //...
           else
-            bazel build //task_orchestrator:task_orchestrator //application/...
+            bazel build --config=darwin //...
           fi
 
-      - name: Test
-        run: |
-          if [ "${{ matrix.os }}" = "ubuntu-22.04" ]; then
-            bazel test --config=lld //tests/unit:all //tests/scenario:all //application/tests/... --test_output=errors
-          else
-            bazel test //tests/unit:all //tests/scenario:all //application/tests/... --test_output=errors
-          fi
-
-  lint:
-    runs-on: ubuntu-22.04
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install lld (Linux)
+        if: matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-24.04'
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - name: Set up Xcode (macOS)
+        if: matrix.os == 'macos-15'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
         with:
           bazel_version: "9.0.0"
+
+      - name: Test
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-22.04" ] || [ "${{ matrix.os }}" = "ubuntu-24.04" ]; then
+            bazel test --config=linux //... --test_output=errors
+          else
+            bazel test --config=darwin //... --test_output=errors
+          fi
+
+  lint:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-tidy, clang-format, and Python pip
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy clang-format python3-pip
+
+      - name: Install lld (Linux)
+        run: sudo apt-get install -y lld
+
+      - name: Set up Bazel
+        uses: bazel-contrib/setup-bazel@0.8.0
+        with:
+          bazel_version: "9.0.0"
+
+      - name: Build (for compile_commands aquery)
+        run: bazel build --config=linux //...
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Install clang-tidy
-        run: sudo apt-get update && sudo apt-get install -y clang-tidy
 
       - name: Install pre-commit
         run: pip install pre-commit

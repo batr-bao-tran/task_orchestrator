@@ -38,7 +38,7 @@ def main() -> int:
     def ensure_db():
         try:
             return _load_db()
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
             print(f"Invalid JSON in {db_path}: {e}", file=sys.stderr)
             return None
 
@@ -52,7 +52,11 @@ def main() -> int:
         return "/third_party/" in s or "/external/" in s
 
     if argv:
-        files = [Path(f) for f in argv if Path(f).suffix in suffixes and not skip_external_tu(Path(f))]
+        files = [
+            (root / f).resolve()
+            for f in argv
+            if Path(f).suffix in suffixes and not skip_external_tu(Path(f))
+        ]
     else:
         files = [Path(e["file"]) for e in db if not skip_external_tu(Path(e["file"]))]
     if not files:

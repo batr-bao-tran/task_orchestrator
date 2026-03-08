@@ -187,11 +187,13 @@ TEST(GeneratorTest, BarrierSyncThenGeneratePerThread) {
   std::mutex mu;
   std::vector<std::string> order;
 
-  auto worker = [&](unsigned /* id */, const std::string& label) {
+  const auto worker = [&](unsigned /* id */, const std::string& label) {
     sync.arrive_and_wait();
     auto gen = [label]() -> to::Generator<std::string> {
-      co_yield label + "_1";
-      co_yield label + "_2";
+      const std::string label_1 = label + "_1";
+      co_yield label_1;
+      const std::string label_2 = label + "_2";
+      co_yield label_2;
     }();
     for (const auto& s : gen) {
       std::scoped_lock lock(mu);
