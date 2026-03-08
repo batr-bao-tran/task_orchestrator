@@ -103,7 +103,7 @@ TEST(SchedulerTest, PlanLazy) {
       to::Actor{.id = "A2", .capacity = 1, .availability_windows = {{.start = 0, .end = 1000}}, .current_load = 0});
   size_t count = 0;
   for (const to::Assignment& a : to::Scheduler::plan_lazy(w5, state5, reg5, 0)) {
-    EXPECT_TRUE(a.actor_id == "A1" || a.actor_id == "A2");
+    EXPECT_TRUE(a.actor_id == "A1" || a.actor_id == "A2") << "actor_id=" << a.actor_id;
     count++;
   }
   EXPECT_EQ(2U, count);

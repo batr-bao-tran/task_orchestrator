@@ -1,17 +1,21 @@
 build --cxxopt=-std=c++20
 build --host_cxxopt=-std=c++20
 
-# Ensure link step can find 'ld' (e.g. /usr/bin/ld from binutils). No manual install needed
-# when a standard C++ toolchain is present; Bazel's sandbox may otherwise hide system PATH.
-build --action_env=PATH=/usr/bin:/bin:/usr/local/bin
+build --action_env=PATH
+build --host_action_env=PATH
 
-# Use gold linker (supports --start-lib; ld.bfd does not). Falls back to default if gold missing.
-build --linkopt=-fuse-ld=gold
-build --host_linkopt=-fuse-ld=gold
+build:linux --linkopt=-fuse-ld=lld
+build:linux --host_linkopt=-fuse-ld=lld
 
-# Use GNU ld.bfd (may fail with "unrecognized option '--start-lib'").
+build:darwin --define=platform=darwin
+
+# Optional linker configs (Linux only).
+build:gold --linkopt=-fuse-ld=gold
+build:gold --host_linkopt=-fuse-ld=gold
 build:bfd --linkopt=-fuse-ld=bfd
 build:bfd --host_linkopt=-fuse-ld=bfd
+build:lld --linkopt=-fuse-ld=lld
+build:lld --host_linkopt=-fuse-ld=lld
 
 build --cxxopt=-Wall --cxxopt=-Wextra
 

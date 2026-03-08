@@ -138,8 +138,9 @@ Generator<Assignment> Scheduler::plan_lazy(const Workflow& workflow,
       }
     }
     if (found) {
-      load[best_actor]++;
-      co_yield Assignment{.task_id = ti.id, .actor_id = best_actor, .start_time = best_start};
+      ++load[best_actor];
+      Assignment a{.task_id = ti.id, .actor_id = best_actor, .start_time = best_start};
+      co_yield a;
     }
   }
   co_return;
