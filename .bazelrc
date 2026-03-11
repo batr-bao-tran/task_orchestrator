@@ -3,11 +3,16 @@ build --host_cxxopt=-std=c++20
 
 build --action_env=PATH
 build --host_action_env=PATH
+build --action_env=SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+build --host_action_env=SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+build --action_env=DEVELOPER_DIR=/Library/Developer/CommandLineTools
+build --host_action_env=DEVELOPER_DIR=/Library/Developer/CommandLineTools
 
 build:linux --linkopt=-fuse-ld=lld
 build:linux --host_linkopt=-fuse-ld=lld
 
 build:darwin --define=platform=darwin
+build:darwin --macos_minimum_os=11.0
 
 # Optional linker configs (Linux only).
 build:gold --linkopt=-fuse-ld=gold

@@ -1,10 +1,8 @@
-load("@rules_cc//cc:defs.bzl", "cc_test")
+load("//tools/testing:cc_test_defs.bzl", "cc_tests_from_glob")
 
-cc_test(
-    name = "generator_test",
+cc_tests_from_glob(
     size = "small",
-    srcs = ["generator_test.cpp"],
-    deps = [
+    default_deps = [
         "//utils",
         "@googletest//:gtest_main",
     ],

@@ -7,7 +7,7 @@ The **task_orchestrator** is a C++ library for generic workflow coordination amo
 - **Workflows**: DAG of phases with processes and sub-processes.
 - **Actors**: Resources with capacity and availability (uptime windows).
 - **Scheduling**: Optimization-driven assignment of work to actors to maximize throughput and uptime utilisation.
-- **Low-latency planning**: A Boost.MSM state machine drives the planning loop and phase transitions for fast reaction.
+- **Low-latency planning**: A Boost.MSM state machine drives the planning loop and phase transitions.
 
 ## 2. Design Goals
 
@@ -34,7 +34,7 @@ The **task_orchestrator** is a C++ library for generic workflow coordination amo
 │                  │                                              │
 │         ┌────────▼────────┐  ┌─────────────────┐                │
 │         │  ActorRegistry  │  │  Assignment     │                │
-│         │  (capacity,     │  │  (task→actor,   │                │
+│         │  (capacity,     │  │  (task->actor,  │                │
 │         │   availability) │  │   start time)   │                │
 │         └─────────────────┘  └─────────────────┘                │
 └─────────────────────────────────────────────────────────────────┘
@@ -70,10 +70,17 @@ The **task_orchestrator** is a C++ library for generic workflow coordination amo
 - **Input**: Current workflow state (which phases are done, which tasks are pending), actor registry (capacities, availability, current load), and optionally current time.
 - **Output**: Assignment set (task → actor, start_time).
 - **Objective**: Maximise throughput (e.g. total work completed per unit time) and uptime utilisation (prefer using available actor time).
-- **Algorithm**: Greedy with priority and capacity constraints (low latency, deterministic). Optionally extend with a simple LP or greedy bin-packing for batching.
-  - Sort pending tasks by priority (and optionally deadline).
-  - For each task, choose an actor and start time that: (a) satisfy capacity and availability, (b) minimise start time (earliest feasible), (c) maximise utilisation (prefer actors with more remaining availability).
-- **Interface**: `ScheduleResult plan(WorkflowState const&, ActorRegistry const&, Time now)`.
+- **Algorithm**: Greedy with deterministic ordering and two-stage ranking.
+  - Stage 1 (task ordering): use the configured task strategy (`EDF` default; also `FIFO`, `SJF`, `PriorityOnly`).
+  - Stage 2 (actor selection): evaluate only feasible actors, then apply an ordered actor ranking profile.
+- **Actor ranking profile**:
+  - A profile is an ordered list of criteria from most important to least important.
+  - Example profile: `distance_to_work` > `earliest_feasible_start` > `uptime_utilisation`.
+  - Rank comparison is lexicographic: the first criterion that differs decides; each criterion must define sort direction and deterministic tie-breakers.
+- **Feasibility gate**:
+  - A candidate actor is considered only if capacity and availability constraints are satisfied for the task duration.
+  - Ranking never overrides feasibility.
+- **Interface**: `ScheduleResult plan(const WorkflowState&, const ActorRegistry&, Time now)`.
 
 ### 3.6 Boost.MSM State Machine (Planner FSM)
 
@@ -86,94 +93,88 @@ The **task_orchestrator** is a C++ library for generic workflow coordination amo
   - Running + PhaseComplete → Running (update state) or Completing if phase was last.
   - Running + AllPhasesComplete → Idle.
   - Completing + (cleanup) → Idle.
-- **Purpose**: Keep planning and dispatching separate from “running” so that the planner can run in a tight loop with low latency; the FSM reacts to events (e.g. PhaseComplete) and triggers the next planning round.
+- **Purpose**: Keep planning and dispatching separate from “running” so that the planner can run in a tight loop; the FSM reacts to events (e.g. PhaseComplete) and triggers the next planning round.
 
 ### 3.7 Orchestrator (Facade)
 
 - Holds: one Workflow, one ActorRegistry, one Scheduler, one PlannerStateMachine, and current Assignment and WorkflowState.
-- **API** (high level):
+- **API**:
   - `void set_workflow(Workflow)` and `void register_actor(Actor)`.
   - `void start()` (start FSM; move to Planning).
   - `void tick(Time)` (feed Tick or advance time; may trigger planning).
   - `ScheduleResult get_latest_schedule()` (after ScheduleReady).
   - Callbacks or observers for PhaseComplete / AllPhasesComplete can be plugged in.
 - The orchestrator advances the FSM and invokes the scheduler when in Planning state; when the scheduler returns, it emits ScheduleReady and transitions to Dispatching.
+- **Dynamic replanning**:
+  - Replan is event-driven and idempotent: multiple triggers at the same time collapse into one planning cycle.
+  - Replan triggers:
+    - Actor state transition to `UNAVAILABLE` for new work.
+    - Task execution failure where the task is `RESUMABLE` by another actor.
+    - Task failure while `UNRESUMABLE`; planner is notified only when task status later changes to `RESUMABLE`.
+  - Replan scope:
+    - Keep in-flight assignments that are still valid.
+    - Recompute assignments for unstarted tasks and resumable failed tasks.
+  - Replan correctness requirements:
+    - Never assign new work to `UNAVAILABLE` actors.
+    - Do not reschedule `UNRESUMABLE` tasks.
+    - When resumability becomes true, include the task in the next planning round.
 
 ## 4. Build and Dependencies
 
-- **Build**: Bazel. C++17.
+- **Build**: Bazel. C++20.
 - **Dependencies**: Boost (for Boost.MSM and any used Boost headers: MPL, Fusion, etc.). No other external runtime dependencies.
 - **Layout**:
   - `task_orchestrator/`: main library (public headers under `include/`, sources under `src/`).
-  - `tests/unit/`: unit tests per component (workflow, phase, actor, scheduler, state machine, orchestrator).
+  - `tests/unit/`: unit tests per component (workflow, phase, actor, scheduler, state machine, orchestrator, etc.).
   - `tests/scenario/`: multi-actor workflows, sub-processes, phase ordering, scheduling under constraints, FSM transitions.
 
 ## 5. Testing Strategy
 
-- **Unit tests** (per component):
-  - Workflow: build DAG, query phases, dependencies, ready phases.
-  - Phase: add/remove processes, dependency checks.
-  - Actor: capacity, availability windows, load.
-  - Scheduler: given a small WorkflowState and ActorRegistry, assert assignment satisfies capacity and availability and respects priorities.
-  - PlannerStateMachine: inject events, assert state transitions and possibly entry/exit actions.
-  - Orchestrator: mock or minimal workflow/actors, start/tick, assert FSM and schedule output.
-- **Scenario tests**:
-  - Two-phase workflow, two actors with different availability; assert assignments and phase order.
-  - Sub-processes: one phase with one process containing two sub-processes; assert both sub-processes scheduled.
-  - Throughput: multiple tasks, limited actors; assert no over-assignment and that high-priority tasks get earlier slots.
-  - Uptime: actors with gaps; assert no assignment in gaps.
-  - FSM: full cycle Idle → Planning → Dispatching → Running → PhaseComplete → … → Idle.
+The repository uses layered coverage and each new feature should add tests at the lowest useful layer first, then at one integration layer above it.
+
+- **Current suite baseline**:
+  - `task_orchestrator/tests/unit/`: data model and core logic components.
+  - `task_orchestrator/tests/scenario/`: end-to-end scheduler/orchestrator behaviour.
+  - `task_orchestrator/tests/scenario/strategy/`: strategy-specific ordering checks (`edf`, `fifo`, `sjf`, `priority_only`).
+  - `application/tests/`: config loader, runner behavior, and DES-driven runner tests.
+  - `utils/tests/`: utility behavior.
+- **Developer coverage policy**:
+  - Add or update unit tests for every new branch in pure logic code.
+  - Add scenario tests whenever a change affects interactions between workflow, scheduler, actors, and FSM transitions.
+  - Add discrete event simulation tests when correctness depends on event timing or event ordering.
+  - Prefer deterministic assertions: explicit actor/task IDs, start times, and state transitions.
+  - Treat strategy and ranking behaviour as contract tests: test ordering and fallback behaviour.
 
 ## 6. File Layout (Bazel)
 
 ```
+application/
+  BUILD
+  config/
+    ...
+  runner/
+    ...
+  tests/
+    ...
 task_orchestrator/
   BUILD
   include/task_orchestrator/
-    types.hpp
-    workflow.hpp
-    phase.hpp
-    process.hpp
-    actor.hpp
-    scheduler.hpp
-    planner_fsm.hpp
-    orchestrator.hpp
+    ...
   src/
-    workflow.cpp
-    phase.cpp
-    process.cpp
-    actor.cpp
-    scheduler.cpp
-    planner_fsm.cpp
-    orchestrator.cpp
+    ...
+  tests/
+    unit/
+      ...
+    scenario/
+      ...
 third_party/
-  BUILD (or boost.BUILD for Boost)
-tests/
+  BUILD (3rd party dependencies)
+utils/
   BUILD
-  unit/
-    BUILD
-    workflow_test.cpp
-    phase_test.cpp
-    process_test.cpp
-    actor_test.cpp
-    scheduler_test.cpp
-    planner_fsm_test.cpp
-    orchestrator_test.cpp
-  scenario/
-    BUILD
-    multi_actor_workflow_test.cpp
-    subprocess_workflow_test.cpp
-    throughput_scheduling_test.cpp
-    uptime_availability_test.cpp
-    fsm_lifecycle_test.cpp
+  include/utils/
+    ...
+  src/
+    ...
+  tests/
+    ...
 ```
-
-## 7. Chosen Approach Summary
-
-- **State machine**: Boost.MSM for a clear, explicit FSM and low-latency planning loop.
-- **Scheduling**: Greedy priority- and capacity-aware algorithm first (simple, predictable, fast); structure allows swapping in an LP or other optimiser later.
-- **Workflow**: Explicit DAG of phases; processes and sub-processes live in phases with clear ownership.
-- **Actors**: Registry with capacity and time-window availability; scheduler queries it read-only.
-- **Testing**: Full unit coverage per type and component; scenario tests for integration, throughput, uptime, and FSM lifecycle.
-
-This design keeps the library generic, testable, and extensible while meeting the requirements for multi-actor coordination, processes/sub-processes/phases, throughput/uptime-oriented scheduling, and low-latency planning via Boost.MSM.

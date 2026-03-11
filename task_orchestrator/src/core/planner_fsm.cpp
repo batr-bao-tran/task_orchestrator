@@ -23,6 +23,9 @@ struct PlannerFsmDef : msm::front::state_machine_def<PlannerFsmDef> {
 
   using transition_table =
       mpl::vector<msm::front::Row<Idle, StartPlanning, Planning, msm::front::none, msm::front::none>,
+                  msm::front::Row<Running, StartPlanning, Planning, msm::front::none, msm::front::none>,
+                  msm::front::Row<Dispatching, StartPlanning, Planning, msm::front::none, msm::front::none>,
+                  msm::front::Row<Planning, StartPlanning, Planning, msm::front::none, msm::front::none>,
                   msm::front::Row<Planning, ScheduleReady, Dispatching, msm::front::none, msm::front::none>,
                   msm::front::Row<Dispatching, DispatchComplete, Running, msm::front::none, msm::front::none>,
                   msm::front::Row<Running, PhaseComplete, Running, msm::front::none, msm::front::none>,
@@ -55,7 +58,7 @@ struct PlannerStateMachine::Impl {
 
 PlannerStateMachine::PlannerStateMachine() : impl_(new Impl) {}
 
-PlannerStateMachine::~PlannerStateMachine() { delete impl_; }
+PlannerStateMachine::~PlannerStateMachine() noexcept { delete impl_; }
 
 PlannerState PlannerStateMachine::current_state() const { return impl_->last_known_state; }
 

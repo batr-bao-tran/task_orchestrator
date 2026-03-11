@@ -47,7 +47,7 @@ using StateChangeCallback = std::function<void(PlannerState, PlannerState)>;
 class PlannerStateMachine {
  public:
   PlannerStateMachine();
-  ~PlannerStateMachine();
+  ~PlannerStateMachine() noexcept;
 
   PlannerStateMachine(const PlannerStateMachine&) = delete;
   PlannerStateMachine& operator=(const PlannerStateMachine&) = delete;

@@ -1,5 +1,6 @@
 #ifndef TASK_ORCHESTRATOR__UTILS_INCLUDE_UTILS__SIM_CLOCK_HPP_
 #define TASK_ORCHESTRATOR__UTILS_INCLUDE_UTILS__SIM_CLOCK_HPP_
+#include <cstdint>
 #include <functional>
 #include <queue>
 #include <vector>
@@ -8,7 +9,8 @@
 
 namespace task_orchestrator {
 
-/** Discrete event simulation clock and event queue. */
+/** Discrete event simulation clock and event queue.
+ *  Events at the same time are executed in FIFO (insertion) order. */
 class SimClock {
  public:
   using Time = task_orchestrator::Time;
@@ -33,14 +35,17 @@ class SimClock {
     while (!queue_.empty()) {
       queue_.pop();
     }
+    next_seq_ = 0;
   }
 
  private:
   Time now_{0};
+  uint64_t next_seq_{0};
   struct Event {
     Time at;
+    uint64_t seq;
     EventCallback cb;
-    bool operator>(const Event& o) const { return at > o.at; }
+    bool operator>(const Event& o) const { return (at != o.at) ? (at > o.at) : (seq > o.seq); }
   };
   std::priority_queue<Event, std::vector<Event>, std::greater<>> queue_;
 };

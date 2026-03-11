@@ -4,7 +4,9 @@
 
 namespace task_orchestrator {
 
-void SimClock::schedule_at(Time t, EventCallback cb) { queue_.push(Event{.at = t, .cb = std::move(cb)}); }
+void SimClock::schedule_at(Time t, EventCallback cb) {
+  queue_.push(Event{.at = t, .seq = next_seq_++, .cb = std::move(cb)});
+}
 
 SimClock::Time SimClock::advance_to_next() {
   if (queue_.empty()) return now_;

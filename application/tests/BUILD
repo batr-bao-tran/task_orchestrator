@@ -1,44 +1,25 @@
-load("@rules_cc//cc:defs.bzl", "cc_test")
+load("//tools/testing:cc_test_defs.bzl", "cc_tests_from_glob")
 
-cc_test(
-    name = "config_loader_test",
+cc_tests_from_glob(
     size = "small",
-    srcs = ["config_loader_test.cpp"],
-    deps = [
-        "//application:config",
+    default_deps = [
         "@googletest//:gtest_main",
     ],
-)
-
-cc_test(
-    name = "runner_test",
-    size = "small",
-    srcs = ["runner_test.cpp"],
-    deps = [
-        "//application:runner",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "des_runner_test",
-    size = "small",
-    srcs = ["des_runner_test.cpp"],
-    deps = [
-        "//application:runner",
-        "//task_orchestrator",
-        "//utils",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "scenario_warehouse_test",
-    size = "medium",
-    srcs = ["scenario_warehouse_test.cpp"],
-    deps = [
-        "//application:config",
-        "//application:runner",
-        "@googletest//:gtest_main",
-    ],
+    per_test_deps = {
+        "config_loader_test.cpp": [
+            "//application:config",
+        ],
+        "runner_test.cpp": [
+            "//application:runner",
+        ],
+        "des_runner_test.cpp": [
+            "//application:runner",
+            "//task_orchestrator",
+            "//utils",
+        ],
+        "scenario_warehouse_test.cpp": [
+            "//application:config",
+            "//application:runner",
+        ],
+    },
 )

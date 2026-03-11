@@ -43,4 +43,15 @@ TEST(PlannerFsmTest, StateChangeCallback) {
   EXPECT_EQ(to::PlannerState::Planning, to);
   EXPECT_EQ(to::PlannerState::Idle, from);
 }
+
+TEST(PlannerFsmTest, StartPlanningFromRunningTransitionsToPlanning) {
+  to::PlannerStateMachine fsm;
+  fsm.process_event(to::StartPlanning{});
+  fsm.process_event(to::ScheduleReady{});
+  fsm.process_event(to::DispatchComplete{});
+  ASSERT_EQ(to::PlannerState::Running, fsm.current_state());
+
+  fsm.process_event(to::StartPlanning{});
+  EXPECT_EQ(to::PlannerState::Planning, fsm.current_state());
+}
 }  // namespace

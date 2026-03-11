@@ -1,66 +1,14 @@
-load("@rules_cc//cc:defs.bzl", "cc_test")
+load("//tools/testing:cc_test_defs.bzl", "cc_tests_from_glob")
 
-_GTEST_DEPS = [
-    "//task_orchestrator:task_orchestrator",
-    "@googletest//:gtest_main",
-]
-
-cc_test(
-    name = "types_test",
+cc_tests_from_glob(
     size = "small",
-    srcs = ["types_test.cpp"],
-    deps = _GTEST_DEPS,
-)
-
-cc_test(
-    name = "process_test",
-    size = "small",
-    srcs = ["process_test.cpp"],
-    deps = _GTEST_DEPS,
-)
-
-cc_test(
-    name = "actor_test",
-    size = "small",
-    srcs = ["actor_test.cpp"],
-    deps = _GTEST_DEPS,
-)
-
-cc_test(
-    name = "workflow_test",
-    size = "small",
-    srcs = ["workflow_test.cpp"],
-    deps = _GTEST_DEPS,
-)
-
-cc_test(
-    name = "scheduler_test",
-    size = "small",
-    srcs = ["scheduler_test.cpp"],
-    deps = _GTEST_DEPS,
-)
-
-cc_test(
-    name = "planner_fsm_test",
-    size = "small",
-    srcs = ["planner_fsm_test.cpp"],
-    deps = _GTEST_DEPS,
-)
-
-cc_test(
-    name = "orchestrator_test",
-    size = "small",
-    srcs = ["orchestrator_test.cpp"],
-    deps = _GTEST_DEPS,
-)
-
-cc_test(
-    name = "sim_clock_test",
-    size = "small",
-    srcs = ["sim_clock_test.cpp"],
-    deps = [
-        "//task_orchestrator",
-        "//utils",
+    default_deps = [
+        "//task_orchestrator:task_orchestrator",
         "@googletest//:gtest_main",
     ],
+    per_test_deps = {
+        "sim_clock_test.cpp": [
+            "//utils",
+        ],
+    },
 )
