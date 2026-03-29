@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package task_orchestrator.protocol.v1;
+
+option cc_enable_arenas = true;
+
+import "task_orchestration_service/control_plane.proto";
+import "task_orchestration_service/operator_api.proto";
+
+// Operator-focused API layered above the durable control plane.
+//
+// This service is optimized for human-in-the-loop workflows and browser UIs. It
+// provides one aggregated dashboard read plus task/workflow mutation operations
+// that immediately return an updated dashboard snapshot.
+service WorkflowOperatorApi {
+  // Returns an aggregated operator dashboard.
+  rpc GetDashboard(GetOperatorDashboardRequest) returns (GetOperatorDashboardResponse);
+
+  // Creates or replaces a full workflow definition.
+  rpc UpsertWorkflow(UpsertOperatorWorkflowRequest) returns (OperatorMutationResponse);
+
+  // Inserts or replaces one task within an existing workflow.
+  rpc UpsertTask(UpsertOperatorTaskRequest) returns (OperatorMutationResponse);
+
+  // Removes one task from an existing workflow.
+  rpc DeleteTask(DeleteOperatorTaskRequest) returns (OperatorMutationResponse);
+
+  // Pauses a workflow and returns the refreshed operator dashboard.
+  rpc PauseWorkflow(OperatorWorkflowActionRequest) returns (OperatorMutationResponse);
+
+  // Resumes a workflow and returns the refreshed operator dashboard.
+  rpc ResumeWorkflow(OperatorWorkflowActionRequest) returns (OperatorMutationResponse);
+
+  // Cancels a workflow and returns the refreshed operator dashboard.
+  rpc CancelWorkflow(OperatorWorkflowActionRequest) returns (OperatorMutationResponse);
+
+  // Records a manual intervention and returns the refreshed operator dashboard.
+  rpc ApplyManualIntervention(ManualInterventionRequest) returns (OperatorMutationResponse);
+}

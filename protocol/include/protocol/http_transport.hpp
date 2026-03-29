@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 
+#include "protocol/operator_api.hpp"
 #include "protocol/runtime_api.hpp"
 #include "protocol/tls_credentials.hpp"
 
@@ -16,7 +17,9 @@ class BeastHttpWorkflowApiServer final : public HttpWorkflowApiServer {
   BeastHttpWorkflowApiServer(
       WorkflowRuntimeService& service,
       HttpEndpointOptions options = {},
-      std::shared_ptr<const TlsCredentialProvider> tls_provider = make_default_tls_credential_provider());
+      std::shared_ptr<const TlsCredentialProvider> tls_provider = make_default_tls_credential_provider(),
+      WorkflowOperatorService* operator_service = nullptr,
+      WorkflowOperatorEventService* operator_event_service = nullptr);
   ~BeastHttpWorkflowApiServer() noexcept override;
 
   BeastHttpWorkflowApiServer(const BeastHttpWorkflowApiServer&) = delete;

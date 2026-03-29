@@ -142,6 +142,8 @@ message SubmitWorkflowRequest {
   ClientAuthContext auth = 2;
   // Whether an existing workflow with the same id may be replaced.
   optional bool replace_existing = 3;
+  // Optional idempotency key used by durable control-plane wrappers.
+  optional string idempotency_key = 4;
 }
 
 // Task-level runtime override applied before optional re-orchestration.
@@ -182,6 +184,10 @@ message ReorchestrateRequest {
   ClientAuthContext auth = 4;
   // Whether the service should immediately run another planning pass.
   optional bool trigger_reorchestration = 5;
+  // Optional idempotency key used by durable control-plane wrappers.
+  optional string idempotency_key = 6;
+  // Optional optimistic-concurrency token for control-plane managed plan versions.
+  optional int64 expected_plan_version = 7;
 }
 
 // Final task assignment returned by the planner.

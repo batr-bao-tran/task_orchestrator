@@ -220,6 +220,11 @@ launch:
       completion_queue_threads: 3
       max_receive_message_bytes: 4096
       max_send_message_bytes: 8192
+  control_plane:
+    enabled: true
+    database_path: /var/lib/task-orchestrator/control-plane/control_plane.sqlite3
+    recover_on_start: false
+    prune_after_days: 21
 workflow:
   id: bootstrap
   actors:
@@ -257,6 +262,11 @@ workflow:
   EXPECT_EQ(3U, launch_config.interfaces.grpc.endpoint.completion_queue_threads);
   EXPECT_EQ(4096, launch_config.interfaces.grpc.endpoint.max_receive_message_bytes);
   EXPECT_EQ(8192, launch_config.interfaces.grpc.endpoint.max_send_message_bytes);
+  EXPECT_TRUE(launch_config.control_plane.enabled);
+  EXPECT_EQ("/var/lib/task-orchestrator/control-plane/control_plane.sqlite3",
+            launch_config.control_plane.database_path);
+  EXPECT_FALSE(launch_config.control_plane.recover_on_start);
+  EXPECT_EQ(21, launch_config.control_plane.prune_after_days);
 
   ASSERT_TRUE(launch_config.bootstrap_workflow.has_value());
   EXPECT_EQ("bootstrap", launch_config.bootstrap_workflow->id);

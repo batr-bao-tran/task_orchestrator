@@ -87,8 +87,10 @@ cc_library(
     ],
     deps = [
         ":config",
+        ":operator_service",
         ":runner",
         ":runtime_service",
+        "//control_plane",
         "//protocol:grpc_transport",
         "//protocol:http_transport",
         "//task_orchestrator",
@@ -103,9 +105,11 @@ cc_library(
     visibility = ["//application:__subpackages__"],
     deps = [
         ":config",
+        ":operator_service",
         ":runner",
         ":runner_types",
         ":runtime_service",
+        "//control_plane",
         "//protocol:runtime_api",
         "//task_orchestrator",
         "//utils",
@@ -130,6 +134,27 @@ cc_library(
     deps = [
         ":config",
         ":runner",
+        "//protocol:runtime_api",
+        "//utils",
+    ],
+)
+
+cc_library(
+    name = "operator_service",
+    srcs = ["operator/src/operator_service.cpp"],
+    hdrs = ["operator/include/operator/operator_service.hpp"],
+    includes = [
+        ".",
+        "operator/include",
+    ],
+    visibility = [
+        "//application:__subpackages__",
+        "//visibility:public",
+    ],
+    deps = [
+        "//control_plane",
+        "//protocol:control_plane_api",
+        "//protocol:operator_api",
         "//protocol:runtime_api",
         "//utils",
     ],

@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package task_orchestrator.protocol.v1;
+
+option cc_enable_arenas = true;
+
+import "task_orchestration_service/control_plane.proto";
+
+// Operator-facing control-plane API layered on top of the runtime planning API.
+//
+// This service is the durable, queryable surface that external clients should
+// use for workflow lifecycle management, operator tooling, and history/audit
+// retrieval. The runtime API remains responsible for executing planning
+// requests, while this service exposes the persisted control-plane state built
+// around those requests.
+service WorkflowControlPlaneApi {
+  // Lists workflow summaries in durable storage.
+  //
+  // Use this for dashboards, pagination, and status views where callers need a
+  // compact workflow record rather than full history.
+  rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
+
+  // Searches workflows by operator-oriented text fields and optional state
+  // filters.
+  //
+  // Typical queries include workflow identifiers, recent error text, or other
+  // indexed metadata exposed by the control plane.
+  rpc SearchWorkflows(SearchWorkflowsRequest) returns (SearchWorkflowsResponse);
+
+  // Returns the latest durable record for a single workflow.
+  //
+  // This is the canonical "current view" lookup and includes summary metadata,
+  // the last stored config, and the latest runtime response when one exists.
+  rpc GetWorkflow(GetWorkflowRequest) returns (GetWorkflowResponse);
+
+  // Returns the durable history of a workflow.
+  //
+  // History includes the current workflow record plus event-log entries, plan
+  // versions, and audit entries, subject to the per-section limits in the
+  // request.
+  rpc GetWorkflowHistory(GetWorkflowHistoryRequest) returns (GetWorkflowHistoryResponse);
+
+  // Compares two stored plan versions for the same workflow.
+  //
+  // The response is intended for operator UIs and tooling that need to explain
+  // how assignments changed between planning runs.
+  rpc GetPlanDiff(GetPlanDiffRequest) returns (GetPlanDiffResponse);
+
+  // Pauses a workflow in the control plane.
+  //
+  // A paused workflow remains durably visible and queryable, but should not be
+  // advanced automatically until it is resumed.
+  rpc PauseWorkflow(PauseWorkflowRequest) returns (WorkflowActionResponse);
+
+  // Resumes a previously paused workflow.
+  //
+  // This moves the workflow back into an active lifecycle so that planning or
+  // operator-driven actions may continue.
+  rpc ResumeWorkflow(ResumeWorkflowRequest) returns (WorkflowActionResponse);
+
+  // Cancels a workflow permanently.
+  //
+  // Cancellation is an operator-visible terminal action and should be treated
+  // as stronger than pause. Clients should not assume the workflow can be
+  // resumed afterwards.
+  rpc CancelWorkflow(CancelWorkflowRequest) returns (WorkflowActionResponse);
+
+  // Records a manual operator intervention and optionally triggers replanning.
+  //
+  // This RPC is used to attach an operator note, apply task/actor overrides,
+  // and request a controlled re-orchestration pass under idempotency and
+  // optimistic concurrency rules.
+  rpc ApplyManualIntervention(ManualInterventionRequest) returns (WorkflowActionResponse);
+}

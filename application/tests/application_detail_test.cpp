@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "runtime_service/in_memory_runtime_service.hpp"
 #include "task_orchestrator/optimizer/model.hpp"
 
 namespace {

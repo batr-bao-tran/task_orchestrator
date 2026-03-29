@@ -1,0 +1,307 @@
+syntax = "proto3";
+
+package task_orchestrator.protocol.v1;
+
+option cc_enable_arenas = true;
+
+import "task_orchestration_service/task_orchestration.proto";
+
+// Durable lifecycle states tracked by the control plane for each workflow.
+//
+// These states describe how the workflow should be interpreted operationally,
+// which is slightly broader than "did the planner return a result". For
+// example, a workflow may be paused or recovering even though its last plan was
+// valid.
+enum WorkflowLifecycleState {
+  // Default zero value. Treat as unknown or not yet initialized.
+  WORKFLOW_LIFECYCLE_STATE_UNSPECIFIED = 0;
+  // The workflow was accepted and stored, but planning may not have started yet.
+  WORKFLOW_LIFECYCLE_STATE_SUBMITTED = 1;
+  // A planning or replanning pass is currently in progress.
+  WORKFLOW_LIFECYCLE_STATE_PLANNING = 2;
+  // The latest planning pass completed successfully and produced a plan.
+  WORKFLOW_LIFECYCLE_STATE_PLANNED = 3;
+  // Operator intervention paused further planning activity.
+  WORKFLOW_LIFECYCLE_STATE_PAUSED = 4;
+  // The workflow was intentionally cancelled and should not be resumed.
+  WORKFLOW_LIFECYCLE_STATE_CANCELLED = 5;
+  // The latest request failed or was rejected.
+  WORKFLOW_LIFECYCLE_STATE_FAILED = 6;
+  // The control plane is replaying durable state back into a runtime instance.
+  WORKFLOW_LIFECYCLE_STATE_RECOVERING = 7;
+}
+
+// Lightweight workflow metadata used for list, search, and status views.
+message WorkflowSummary {
+  // Stable workflow identifier supplied by the client at submission time.
+  string workflow_id = 1;
+  // Current lifecycle state as understood by the control plane.
+  WorkflowLifecycleState state = 2;
+  // Creation time in Unix milliseconds UTC.
+  int64 created_at_unix_ms = 3;
+  // Last time any durable control-plane record changed, in Unix milliseconds UTC.
+  int64 updated_at_unix_ms = 4;
+  // Most recent stored plan version. Starts at zero before a successful plan exists.
+  int64 latest_plan_version = 5;
+  // Count of persisted workflow events for this workflow.
+  int64 total_event_count = 6;
+  // Count of persisted audit entries for this workflow.
+  int64 total_audit_entry_count = 7;
+  // Latest human-readable error seen by the control plane, if any.
+  string last_error_message = 8;
+}
+
+// Durable workflow record returned by get/history APIs.
+//
+// This is the control-plane source of truth for a workflow's current metadata,
+// original submitted config, and most recent runtime response.
+message WorkflowRecord {
+  // Summary fields used by status and operator views.
+  WorkflowSummary summary = 1;
+  // Last submitted workflow definition known to the control plane.
+  WorkflowConfig config = 2;
+  // Most recent terminal runtime response, when one exists.
+  RuntimeApiResponse latest_response = 3;
+}
+
+// Single persisted event in the append-only workflow event log.
+message WorkflowEventRecord {
+  // Monotonic per-workflow event sequence number.
+  int64 sequence = 1;
+  // Event persistence time in Unix milliseconds UTC.
+  int64 recorded_at_unix_ms = 2;
+  // Runtime event payload captured in the durable log.
+  WorkflowEvent event = 3;
+}
+
+// Snapshot of a specific stored plan version.
+//
+// A new version is written when a terminal response contains a successful plan.
+message WorkflowPlanVersion {
+  // Monotonic plan version number scoped to a workflow.
+  int64 version = 1;
+  // Time the version was persisted, in Unix milliseconds UTC.
+  int64 recorded_at_unix_ms = 2;
+  // Runtime response that produced this version.
+  RuntimeApiResponse response = 3;
+}
+
+// Human-authored or system-authored audit trail entry.
+message AuditEntry {
+  // Monotonic per-workflow audit sequence number.
+  int64 sequence = 1;
+  // Time the audit entry was persisted, in Unix milliseconds UTC.
+  int64 recorded_at_unix_ms = 2;
+  // Actor responsible for the action, for example a user id or internal service name.
+  string actor = 3;
+  // Short action name such as "pause", "resume", or "manual_intervention".
+  string action = 4;
+  // Human-readable detail suitable for operator timelines.
+  string detail = 5;
+}
+
+// Stored idempotency replay record for submit/reorchestrate style requests.
+message IdempotencyRecord {
+  // Client-supplied idempotency key.
+  string key = 1;
+  // Workflow affected by the original request.
+  string workflow_id = 2;
+  // Hash/fingerprint of the original request payload used to detect key reuse.
+  string request_fingerprint = 3;
+  // Time the idempotency entry was recorded, in Unix milliseconds UTC.
+  int64 recorded_at_unix_ms = 4;
+  // Cached terminal response replayed when the same request is repeated safely.
+  RuntimeApiResponse cached_response = 5;
+}
+
+// Request to page through workflow summaries.
+message ListWorkflowsRequest {
+  // Maximum number of workflows to return. Zero or negative lets the server choose a default.
+  int32 page_size = 1;
+  // Opaque continuation token returned by a previous ListWorkflows call.
+  string page_token = 2;
+  // Optional lifecycle-state filter. Empty means "all states".
+  repeated WorkflowLifecycleState states = 3;
+}
+
+// Page of workflow summaries.
+message ListWorkflowsResponse {
+  // Workflow summaries for the requested page.
+  repeated WorkflowSummary workflows = 1;
+  // Opaque continuation token for the next page. Empty means no more results.
+  string next_page_token = 2;
+}
+
+// Request to search workflow summaries.
+//
+// Search is intended for operator lookup by workflow id or recent error text,
+// optionally narrowed by lifecycle state.
+message SearchWorkflowsRequest {
+  // Free-text search term matched against control-plane searchable fields.
+  string query = 1;
+  // Maximum number of workflows to return. Zero or negative lets the server choose a default.
+  int32 page_size = 2;
+  // Opaque continuation token returned by a previous SearchWorkflows call.
+  string page_token = 3;
+  // Optional lifecycle-state filter. Empty means "all states".
+  repeated WorkflowLifecycleState states = 4;
+}
+
+// Search result page.
+message SearchWorkflowsResponse {
+  // Workflow summaries that matched the query and filters.
+  repeated WorkflowSummary workflows = 1;
+  // Opaque continuation token for the next page. Empty means no more results.
+  string next_page_token = 2;
+}
+
+// Request for the current durable record of a single workflow.
+message GetWorkflowRequest {
+  // Workflow identifier to fetch.
+  string workflow_id = 1;
+}
+
+// Result of fetching a single workflow record.
+message GetWorkflowResponse {
+  // True when the workflow was found and returned.
+  bool ok = 1;
+  // Returned workflow record when ok is true.
+  WorkflowRecord workflow = 2;
+  // Human-readable failure message when ok is false.
+  string error_message = 3;
+}
+
+// Request for recent durable history associated with one workflow.
+//
+// The max_* fields are per-section limits. A value of zero lets the server
+// return its full available history for that section.
+message GetWorkflowHistoryRequest {
+  // Workflow identifier whose history should be returned.
+  string workflow_id = 1;
+  // Maximum number of event-log records to return.
+  int32 max_events = 2;
+  // Maximum number of stored plan versions to return.
+  int32 max_plan_versions = 3;
+  // Maximum number of audit entries to return.
+  int32 max_audit_entries = 4;
+}
+
+// Combined history payload for one workflow.
+message GetWorkflowHistoryResponse {
+  // True when the workflow exists and history was returned.
+  bool ok = 1;
+  // Current durable workflow record.
+  WorkflowRecord workflow = 2;
+  // Event-log records for the workflow.
+  repeated WorkflowEventRecord events = 3;
+  // Stored plan-version snapshots.
+  repeated WorkflowPlanVersion plan_versions = 4;
+  // Audit trail entries.
+  repeated AuditEntry audit_entries = 5;
+  // Human-readable failure message when ok is false.
+  string error_message = 6;
+}
+
+// Request to pause a workflow from the control plane.
+message PauseWorkflowRequest {
+  // Workflow identifier to pause.
+  string workflow_id = 1;
+  // Actor or user id performing the action. Empty lets the server use an internal default.
+  string actor = 2;
+  // Optional human-readable reason shown in audit history.
+  string reason = 3;
+}
+
+// Request to resume a previously paused workflow.
+message ResumeWorkflowRequest {
+  // Workflow identifier to resume.
+  string workflow_id = 1;
+  // Actor or user id performing the action. Empty lets the server use an internal default.
+  string actor = 2;
+  // Optional human-readable reason shown in audit history.
+  string reason = 3;
+}
+
+// Request to cancel a workflow permanently.
+message CancelWorkflowRequest {
+  // Workflow identifier to cancel.
+  string workflow_id = 1;
+  // Actor or user id performing the action. Empty lets the server use an internal default.
+  string actor = 2;
+  // Optional human-readable reason shown in audit history.
+  string reason = 3;
+}
+
+// Common response returned by pause/resume/cancel/manual-intervention actions.
+message WorkflowActionResponse {
+  // True when the requested action completed successfully.
+  bool ok = 1;
+  // Latest stored workflow record after the attempted action, when available.
+  WorkflowRecord workflow = 2;
+  // Human-readable failure message when ok is false.
+  string error_message = 3;
+}
+
+// Request to record an operator intervention and optionally trigger replanning.
+//
+// This message lets an operator persist a note, apply task/actor overrides, and
+// then request a re-orchestration pass under optimistic concurrency and
+// idempotency controls.
+message ManualInterventionRequest {
+  // Workflow identifier to modify.
+  string workflow_id = 1;
+  // Actor or user id performing the intervention. Empty lets the server use an internal default.
+  string actor = 2;
+  // Human-readable operator note stored in the audit trail.
+  string note = 3;
+  // Task-level runtime overrides to apply before optional replanning.
+  repeated TaskStateOverride task_overrides = 4;
+  // Actor-level runtime overrides to apply before optional replanning.
+  repeated ActorStateOverride actor_overrides = 5;
+  // Whether the server should immediately run a new planning pass after applying the overrides.
+  bool trigger_reorchestration = 6;
+  // Caller authentication context forwarded to the runtime layer if replanning is triggered.
+  ClientAuthContext auth = 7;
+  // Optional idempotency key for the re-orchestration generated by this intervention.
+  optional string idempotency_key = 8;
+  // Optional optimistic-concurrency token. The intervention fails if the stored latest plan version differs.
+  optional int64 expected_plan_version = 9;
+}
+
+// Pair of before/after assignments for the same logical task placement.
+message AssignmentDiff {
+  // Assignment present in the older plan version.
+  Assignment before = 1;
+  // Assignment present in the newer plan version.
+  Assignment after = 2;
+}
+
+// Human-readable diff between two stored plan versions.
+message WorkflowPlanDiff {
+  // Assignments that exist only in the newer plan version.
+  repeated Assignment added_assignments = 1;
+  // Assignments that existed only in the older plan version.
+  repeated Assignment removed_assignments = 2;
+  // Assignments that still exist conceptually but changed actor or timing.
+  repeated AssignmentDiff changed_assignments = 3;
+}
+
+// Request to diff two stored plan versions for one workflow.
+message GetPlanDiffRequest {
+  // Workflow identifier whose plan history should be compared.
+  string workflow_id = 1;
+  // Older plan version number.
+  int64 from_plan_version = 2;
+  // Newer plan version number.
+  int64 to_plan_version = 3;
+}
+
+// Result of diffing two plan versions.
+message GetPlanDiffResponse {
+  // True when both requested versions were found and diffed.
+  bool ok = 1;
+  // Structured plan diff when ok is true.
+  WorkflowPlanDiff diff = 2;
+  // Human-readable failure message when ok is false.
+  string error_message = 3;
+}

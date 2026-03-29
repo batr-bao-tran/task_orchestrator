@@ -16,6 +16,7 @@
 #include <boost/beast/version.hpp>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -36,6 +37,7 @@ using tcp = asio::ip::tcp;
 using detail::configure_tls_server_name;
 using detail::ignorable_tls_shutdown_error;
 using detail::kAcceptPollInterval;
+using detail::kOperatorDashboardSseHeartbeatInterval;
 using detail::make_client_tls_context;
 using detail::make_http_client_request;
 using detail::make_server_tls_context;
@@ -50,6 +52,8 @@ using detail::TlsServerStream;
 
 struct BeastHttpWorkflowApiServer::Impl {
   WorkflowRuntimeService& service;
+  WorkflowOperatorService* operator_service = nullptr;
+  WorkflowOperatorEventService* operator_event_service = nullptr;
   HttpEndpointOptions options;
   std::shared_ptr<const TlsCredentialProvider> tls_provider;
   asio::io_context accept_context{1};
@@ -64,8 +68,12 @@ struct BeastHttpWorkflowApiServer::Impl {
 
   Impl(WorkflowRuntimeService& runtime_service,
        HttpEndpointOptions endpoint_options,
-       std::shared_ptr<const TlsCredentialProvider> tls_credential_provider)
+       std::shared_ptr<const TlsCredentialProvider> tls_credential_provider,
+       WorkflowOperatorService* workflow_operator_service,
+       WorkflowOperatorEventService* workflow_operator_event_service)
       : service(runtime_service),
+        operator_service(workflow_operator_service),
+        operator_event_service(workflow_operator_event_service),
         options(std::move(endpoint_options)),
         tls_provider(std::move(tls_credential_provider)) {}
 
@@ -222,10 +230,83 @@ struct BeastHttpWorkflowApiServer::Impl {
       return;
     }
 
-    auto response = handle_request(parser.get());
+    const auto& request = parser.get();
+    if (detail::is_operator_dashboard_stream_request(request)) {
+      process_operator_dashboard_stream(stream, request);
+      return;
+    }
+
+    auto response = handle_request(request);
     http::write(stream, response, error_code);
     if (error_code) {
       logger->warn("HTTP write failed: {}", error_code.message());
+    }
+  }
+
+  template <typename Stream>
+  void process_operator_dashboard_stream(Stream& stream, const http::request<http::string_body>& request) {
+    if (operator_service == nullptr || operator_event_service == nullptr) {
+      auto response = detail::make_http_message_response(
+          http::status::service_unavailable,
+          detail::make_error_message<GetOperatorDashboardResponse>(
+              "Operator live updates are unavailable because the control plane is not enabled."),
+          request.version(),
+          request.keep_alive(),
+          true);
+      beast::error_code error_code;
+      http::write(stream, response, error_code);
+      if (error_code) {
+        logger->warn("HTTP write failed: {}", error_code.message());
+      }
+      return;
+    }
+
+    const auto target = detail::split_target(std::string_view(request.target().data(), request.target().size()));
+    const auto dashboard_request = detail::make_operator_dashboard_request(target.query, request, options.use_tls);
+    const std::uint64_t initial_event_id = operator_event_service->latest_dashboard_event_id();
+
+    beast::error_code error_code;
+    if (!detail::write_operator_sse_headers(stream, request.version(), &error_code)) {
+      logger->warn("HTTP SSE header write failed: {}", error_code.message());
+      return;
+    }
+
+    auto initial_dashboard = operator_service->get_dashboard(dashboard_request);
+    if (!detail::write_operator_dashboard_sse_event(stream, initial_dashboard, initial_event_id, &error_code)) {
+      if (error_code != asio::error::broken_pipe && error_code != asio::error::connection_reset) {
+        logger->warn("HTTP SSE initial dashboard write failed: {}", error_code.message());
+      }
+      return;
+    }
+
+    std::uint64_t last_event_id = initial_event_id;
+    while (is_running.load()) {
+      const auto update =
+          operator_event_service->wait_for_dashboard_update(last_event_id, kOperatorDashboardSseHeartbeatInterval);
+      if (!update.has_value()) {
+        if (!detail::write_operator_sse_comment(stream, "keepalive", &error_code)) {
+          if (error_code != asio::error::broken_pipe && error_code != asio::error::connection_reset) {
+            logger->warn("HTTP SSE heartbeat write failed: {}", error_code.message());
+          }
+          break;
+        }
+        continue;
+      }
+
+      last_event_id = update->event_id;
+      auto dashboard_update = operator_service->get_dashboard_update(dashboard_request, *update);
+      if (!detail::write_operator_dashboard_update_sse_event(stream, dashboard_update, update->event_id, &error_code)) {
+        if (error_code != asio::error::broken_pipe && error_code != asio::error::connection_reset) {
+          logger->warn("HTTP SSE dashboard write failed: {}", error_code.message());
+        }
+        break;
+      }
+    }
+
+    error_code.clear();
+    detail::write_operator_sse_end(stream, &error_code);
+    if (error_code && error_code != asio::error::broken_pipe && error_code != asio::error::connection_reset) {
+      logger->debug("HTTP SSE shutdown failed: {}", error_code.message());
     }
   }
 
@@ -258,7 +339,7 @@ struct BeastHttpWorkflowApiServer::Impl {
   }
 
   http::response<http::string_body> handle_request(const http::request<http::string_body>& request) {
-    return detail::handle_http_request(service, options.use_tls, request);
+    return detail::handle_http_request(service, operator_service, options.use_tls, request);
   }
 };
 
@@ -413,8 +494,11 @@ struct BeastHttpWorkflowApiClient::Impl {
 
 BeastHttpWorkflowApiServer::BeastHttpWorkflowApiServer(WorkflowRuntimeService& service,
                                                        HttpEndpointOptions options,
-                                                       std::shared_ptr<const TlsCredentialProvider> tls_provider)
-    : impl_(std::make_unique<Impl>(service, std::move(options), std::move(tls_provider))) {}
+                                                       std::shared_ptr<const TlsCredentialProvider> tls_provider,
+                                                       WorkflowOperatorService* operator_service,
+                                                       WorkflowOperatorEventService* operator_event_service)
+    : impl_(std::make_unique<Impl>(
+          service, std::move(options), std::move(tls_provider), operator_service, operator_event_service)) {}
 
 BeastHttpWorkflowApiServer::~BeastHttpWorkflowApiServer() noexcept { stop(); }
 

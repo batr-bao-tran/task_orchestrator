@@ -113,6 +113,34 @@ jobs:
           path: ${{ steps.bazel-cache.outputs.repository_cache_dir }}
           key: ${{ steps.bazel-cache.outputs.repository_cache_key }}
 
+  frontend-quality:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: operator_ui/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: operator_ui
+        run: npm ci
+
+      - name: Run frontend lint
+        working-directory: operator_ui
+        run: npm run lint
+
+      - name: Run frontend unit tests
+        working-directory: operator_ui
+        run: npm run test
+
+      - name: Build frontend
+        working-directory: operator_ui
+        run: npm run build
+
   linux-test:
     needs: linux-build
     strategy:
@@ -428,6 +456,21 @@ jobs:
           BAZEL_CI_REPOSITORY_CACHE_DIR: ${{ steps.bazel-cache.outputs.repository_cache_dir }}
         run: tools/testing/check_coverage.sh 90
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: operator_ui/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: operator_ui
+        run: npm ci
+
+      - name: Run frontend coverage
+        working-directory: operator_ui
+        run: npm run test:coverage:ci
+
       - name: Save Bazel disk cache
         if: steps.restore-disk-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -438,8 +481,14 @@ jobs:
       - name: Export coverage report
         run: cp "$(bazel info output_path)/_coverage/_coverage_report.dat" coverage-report.lcov
 
-      - name: Upload coverage report
+      - name: Upload backend coverage report
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report-lcov
+          name: backend-coverage-report-lcov
           path: coverage-report.lcov
+
+      - name: Upload frontend coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage-report-lcov
+          path: operator_ui/coverage/lcov.info

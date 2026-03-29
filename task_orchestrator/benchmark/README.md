@@ -110,7 +110,7 @@ Use the benchmark according to the decision you are making:
 - Choose an optimizer backend by matching the scenario goal to the quality metrics that matter most for that workflow.
 - Treat `mean_latency_ns` as a budget signal, not the only winner criterion. A solver that is faster but misses deadlines or violates cost intent is usually the wrong production choice.
 
-Generated reports are written under [task_orchestrator/benchmark/results](/home/batr/Documents/repos/task_orchestrator/task_orchestrator/benchmark/results). CSV outputs are ignored by Git.
+Generated reports are written under `task_orchestrator/benchmark/results`. CSV outputs are ignored by Git.
 
 ## Current sample observations
 

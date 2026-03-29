@@ -12,6 +12,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -19,7 +20,11 @@
 #include <thread>
 #include <utility>
 
+#include "control_plane/service/control_plan_service.hpp"
+#include "control_plane/service/event_storage_management_service.hpp"
+#include "control_plane/store/sqlite_workflow_store.hpp"
 #include "detail/application_detail.hpp"
+#include "operator/operator_service.hpp"
 #include "protocol/grpc_transport.hpp"
 #include "protocol/http_transport.hpp"
 #include "runner/runner.hpp"
@@ -408,7 +413,7 @@ std::optional<WorkflowConfig> load_request_workflow(const RequestFileConfig& req
 
 bool handle_submit_yaml(const std::string& path,
                         const std::filesystem::path& base_directory,
-                        InMemoryWorkflowRuntimeService& runtime_service,
+                        protocol::WorkflowRuntimeService& runtime_service,
                         const protocol::SecurityConfig& security_config,
                         const std::shared_ptr<spdlog::logger>& logger) {
   if (path == kReadFromStdinPath) {
@@ -431,7 +436,7 @@ bool handle_submit_yaml(const std::string& path,
 
 bool handle_submit_text(const std::string& path,
                         const std::filesystem::path& base_directory,
-                        InMemoryWorkflowRuntimeService& runtime_service,
+                        protocol::WorkflowRuntimeService& runtime_service,
                         const protocol::SecurityConfig& security_config,
                         const std::shared_ptr<spdlog::logger>& logger) {
   if (path == kReadFromStdinPath) {
@@ -453,7 +458,7 @@ bool handle_submit_text(const std::string& path,
 }
 
 bool handle_reorchestrate(const std::string& workflow_id,
-                          InMemoryWorkflowRuntimeService& runtime_service,
+                          protocol::WorkflowRuntimeService& runtime_service,
                           const protocol::SecurityConfig& security_config,
                           const std::shared_ptr<spdlog::logger>& logger) {
   if (workflow_id.empty()) {
@@ -471,7 +476,7 @@ bool handle_reorchestrate(const std::string& workflow_id,
 
 bool handle_cli_command(const std::string& command_line,
                         const std::filesystem::path& base_directory,
-                        InMemoryWorkflowRuntimeService& runtime_service,
+                        protocol::WorkflowRuntimeService& runtime_service,
                         const protocol::SecurityConfig& security_config,
                         const ServiceEndpoints& endpoints,
                         const std::shared_ptr<spdlog::logger>& logger) {
@@ -518,7 +523,7 @@ int run_cli_loop(const std::filesystem::path& base_directory,
                  const CliInterfaceConfig& cli_config,
                  const protocol::SecurityConfig& security_config,
                  const ServiceEndpoints& endpoints,
-                 InMemoryWorkflowRuntimeService& runtime_service,
+                 protocol::WorkflowRuntimeService& runtime_service,
                  const std::shared_ptr<spdlog::logger>& logger) {
   logger->info("Interactive CLI is ready. Type 'help' for commands.");
 
@@ -588,7 +593,58 @@ int run_service_mode(const ApplicationLaunchConfig& launch_config,
     return EXIT_FAILURE;
   }
 
-  InMemoryWorkflowRuntimeService runtime_service(launch_config.security);
+  struct RuntimeServiceBundle {
+    std::unique_ptr<protocol::WorkflowRuntimeService> runtime_service;
+    control_plane::service::ControlPlanService* control_plan_service = nullptr;
+    std::shared_ptr<control_plane::store::WorkflowStore> workflow_store;
+    std::shared_ptr<control_plane::integration::ConnectorRegistry> connector_registry;
+  };
+
+  RuntimeServiceBundle service_bundle;
+  std::unique_ptr<app::operator_api::OperatorService> operator_service;
+  if (launch_config.control_plane.configured()) {
+    auto workflow_store =
+        std::make_shared<control_plane::store::SqliteWorkflowStore>(launch_config.control_plane.database_path);
+    auto connector_registry = control_plane::integration::make_in_memory_connector_registry();
+    auto workflow_update_feed = control_plane::service::make_in_memory_workflow_update_feed();
+    control_plane::service::EventStorageManagementService event_storage_management(
+        workflow_store, launch_config.control_plane.prune_after_days);
+    if (launch_config.control_plane.pruning_enabled()) {
+      const auto prune_outcome = event_storage_management.prune_stale_boot_history();
+      logger->info(
+          "Control-plane storage prune: performed={}, cutoff_unix_ms={}, events={}, plans={}, audits={}, "
+          "idempotency={}.",
+          prune_outcome.performed,
+          prune_outcome.cutoff_unix_ms,
+          prune_outcome.result.pruned_event_rows,
+          prune_outcome.result.pruned_plan_version_rows,
+          prune_outcome.result.pruned_audit_entry_rows,
+          prune_outcome.result.pruned_idempotency_rows);
+    }
+
+    auto control_plan_runtime_service = std::make_unique<control_plane::service::ControlPlanService>(
+        std::make_unique<InMemoryWorkflowRuntimeService>(launch_config.security),
+        workflow_store,
+        workflow_update_feed,
+        connector_registry);
+    service_bundle.control_plan_service = control_plan_runtime_service.get();
+    service_bundle.workflow_store = workflow_store;
+    service_bundle.connector_registry = connector_registry;
+    service_bundle.runtime_service = std::move(control_plan_runtime_service);
+    operator_service = std::make_unique<app::operator_api::OperatorService>(*service_bundle.runtime_service,
+                                                                            *service_bundle.control_plan_service,
+                                                                            workflow_store,
+                                                                            connector_registry,
+                                                                            workflow_update_feed);
+  } else {
+    service_bundle.runtime_service = std::make_unique<InMemoryWorkflowRuntimeService>(launch_config.security);
+  }
+  protocol::WorkflowRuntimeService& runtime_service = *service_bundle.runtime_service;
+
+  if (service_bundle.control_plan_service != nullptr && launch_config.control_plane.recover_on_start) {
+    service_bundle.control_plan_service->recover_active_workflows(make_local_auth_context(launch_config.security));
+  }
+
   if (launch_config.bootstrap_request.configured()) {
     const auto bootstrap_workflow = load_request_workflow(launch_config.bootstrap_request, base_directory, logger);
     if (!bootstrap_workflow.has_value()) {
@@ -609,7 +665,11 @@ int run_service_mode(const ApplicationLaunchConfig& launch_config,
 
   if (launch_config.interfaces.http.enabled) {
     http_server =
-        std::make_unique<protocol::BeastHttpWorkflowApiServer>(runtime_service, launch_config.interfaces.http.endpoint);
+        std::make_unique<protocol::BeastHttpWorkflowApiServer>(runtime_service,
+                                                               launch_config.interfaces.http.endpoint,
+                                                               protocol::make_default_tls_credential_provider(),
+                                                               operator_service.get(),
+                                                               operator_service.get());
     http_server->start();
     if (!http_server->running()) {
       logger->error("HTTP server failed to start.");

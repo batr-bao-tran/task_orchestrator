@@ -1,0 +1,179 @@
+syntax = "proto3";
+
+package task_orchestrator.protocol.v1;
+
+option cc_enable_arenas = true;
+
+import "task_orchestration_service/control_plane.proto";
+import "task_orchestration_service/task_orchestration.proto";
+
+// High-level dashboard counters rendered in the operator console.
+message OperatorDashboardStats {
+  // Number of persisted workflow events recorded in the recent lookback window.
+  int64 recent_events_persisted = 1;
+  // Number of stored plan-version snapshots currently retained.
+  int64 plan_versions_retained = 2;
+  // Number of configured inbound or outbound connector bindings.
+  int64 connectors_tracked = 3;
+  // Number of workflow records currently tracked by durable storage.
+  int64 workflows_tracked = 4;
+  // Number of workflows in non-terminal lifecycle states.
+  int64 active_workflows = 5;
+}
+
+// Browser-friendly connector summary shown in the integrations panel.
+message OperatorConnectorBinding {
+  // Stable connector identifier.
+  string id = 1;
+  // Human-readable connector type label such as "Webhook source".
+  string kind = 2;
+  // Display name shown to operators.
+  string display_name = 3;
+  // Integration target or endpoint descriptor.
+  string target = 4;
+  // Whether the connector is currently enabled.
+  bool enabled = 5;
+}
+
+// Aggregated dashboard request used by the operator UI.
+//
+// This request intentionally bundles the common status-board lookup into one
+// server call so browser clients do not need to fan out across list, history,
+// diff, and integration endpoints on every refresh.
+message GetOperatorDashboardRequest {
+  // Optional workflow id to select in the returned dashboard payload.
+  string selected_workflow_id = 1;
+  // Optional free-text workflow search query.
+  string workflow_query = 2;
+  // Caller authentication and secure-transport context.
+  ClientAuthContext auth = 3;
+  // Maximum number of workflow summaries to return.
+  int32 workflow_page_size = 4;
+  // Maximum number of recent event records to include for the selected workflow.
+  int32 max_events = 5;
+  // Maximum number of plan versions to include for the selected workflow.
+  int32 max_plan_versions = 6;
+  // Maximum number of audit entries to include for the selected workflow.
+  int32 max_audit_entries = 7;
+}
+
+// Aggregated dashboard payload returned to the operator UI.
+message GetOperatorDashboardResponse {
+  // True when the dashboard was assembled successfully.
+  bool ok = 1;
+  // Server time in Unix milliseconds UTC at response creation.
+  int64 server_time_unix_ms = 2;
+  // Top-level dashboard counters.
+  OperatorDashboardStats stats = 3;
+  // Workflow summaries for the list/search panel.
+  repeated WorkflowSummary workflows = 4;
+  // Selected workflow history bundle, when a workflow was requested or inferred.
+  GetWorkflowHistoryResponse selected_workflow = 5;
+  // Diff between the two latest stored plan versions for the selected workflow, when available.
+  GetPlanDiffResponse selected_plan_diff = 6;
+  // Connector bindings shown in the integrations panel.
+  repeated OperatorConnectorBinding connectors = 7;
+  // Human-readable failure message when ok is false.
+  string error_message = 8;
+  // Effective selected workflow id used by the server.
+  string selected_workflow_id = 9;
+}
+
+// Incremental dashboard update pushed over the live SSE stream.
+//
+// The initial SSE event still uses GetOperatorDashboardResponse so new clients
+// receive a complete snapshot immediately. Subsequent updates use this lighter
+// message so the UI can refresh the workflow list, counters, and selected
+// workflow detail without forcing the server to rebuild the entire dashboard on
+// every emitted event.
+message OperatorDashboardUpdate {
+  // True when the update payload was assembled successfully.
+  bool ok = 1;
+  // Server time in Unix milliseconds UTC when the update payload was assembled.
+  int64 server_time_unix_ms = 2;
+  // Refreshed dashboard counters.
+  OperatorDashboardStats stats = 3;
+  // Refreshed workflow summaries for the current list/search view.
+  repeated WorkflowSummary workflows = 4;
+  // Effective selected workflow id for the current stream query.
+  string selected_workflow_id = 5;
+  // Selected workflow history bundle when the selected workflow changed.
+  GetWorkflowHistoryResponse selected_workflow = 6;
+  // Diff between the two latest stored plan versions for the selected workflow, when available.
+  GetPlanDiffResponse selected_plan_diff = 7;
+  // Connector bindings shown in the integrations panel.
+  repeated OperatorConnectorBinding connectors = 8;
+  // Human-readable failure message when ok is false.
+  string error_message = 9;
+}
+
+// Request to create or replace an entire workflow definition from the operator UI.
+message UpsertOperatorWorkflowRequest {
+  // Workflow configuration to store and submit.
+  WorkflowConfig config = 1;
+  // Caller authentication and secure-transport context.
+  ClientAuthContext auth = 2;
+  // Actor or user id performing the update. Empty lets the server choose a default.
+  string actor = 3;
+  // Optional operator note recorded in the audit trail.
+  string note = 4;
+  // Optional idempotency key for the submit operation.
+  optional string idempotency_key = 5;
+}
+
+// Request to insert a new task or replace an existing task inside a stored workflow.
+message UpsertOperatorTaskRequest {
+  // Workflow identifier to modify.
+  string workflow_id = 1;
+  // Task definition to insert or replace.
+  TaskConfig task = 2;
+  // Caller authentication and secure-transport context.
+  ClientAuthContext auth = 3;
+  // Actor or user id performing the update. Empty lets the server choose a default.
+  string actor = 4;
+  // Optional operator note recorded in the audit trail.
+  string note = 5;
+  // Optional idempotency key for the submit operation generated by this mutation.
+  optional string idempotency_key = 6;
+}
+
+// Request to remove a task from a stored workflow.
+message DeleteOperatorTaskRequest {
+  // Workflow identifier to modify.
+  string workflow_id = 1;
+  // Task identifier to remove.
+  string task_id = 2;
+  // Caller authentication and secure-transport context.
+  ClientAuthContext auth = 3;
+  // Actor or user id performing the update. Empty lets the server choose a default.
+  string actor = 4;
+  // Optional operator note recorded in the audit trail.
+  string note = 5;
+  // Optional idempotency key for the submit operation generated by this mutation.
+  optional string idempotency_key = 6;
+}
+
+// Request to perform a workflow lifecycle action from the operator UI.
+message OperatorWorkflowActionRequest {
+  // Workflow identifier to act on.
+  string workflow_id = 1;
+  // Caller authentication and secure-transport context.
+  ClientAuthContext auth = 2;
+  // Actor or user id performing the action. Empty lets the server choose a default.
+  string actor = 3;
+  // Optional human-readable reason shown in audit history.
+  string reason = 4;
+}
+
+// Common response returned by operator mutations and lifecycle actions.
+//
+// The updated dashboard snapshot is returned inline so the browser can update
+// immediately without issuing a second read after each mutation.
+message OperatorMutationResponse {
+  // True when the mutation completed successfully.
+  bool ok = 1;
+  // Updated dashboard snapshot after the mutation, when available.
+  GetOperatorDashboardResponse dashboard = 2;
+  // Human-readable failure message when ok is false.
+  string error_message = 3;
+}
