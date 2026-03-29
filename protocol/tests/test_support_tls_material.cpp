@@ -1,4 +1,4 @@
-#include "protocol/test_support_tls_material.hpp"
+#include "test_support_tls_material.hpp"
 
 #include <openssl/bio.h>
 #include <openssl/err.h>

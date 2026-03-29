@@ -1,4 +1,20 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//tools/testing:cc_test_defs.bzl", "cc_tests_from_glob")
+
+cc_library(
+    name = "test_support_tls_material",
+    testonly = True,
+    srcs = ["test_support_tls_material.cpp"],
+    hdrs = ["test_support_tls_material.hpp"],
+    includes = ["."],
+    visibility = [
+        "//application/tests:__pkg__",
+        "//protocol/tests:__pkg__",
+    ],
+    deps = [
+        "@@boringssl+//:crypto",
+    ],
+)
 
 cc_tests_from_glob(
     size = "small",
@@ -11,7 +27,7 @@ cc_tests_from_glob(
             "//protocol:grpc_transport",
             "//protocol:runtime_api",
             "//protocol:task_orchestration_service_cc_grpc",
-            "//protocol:test_support_tls_material",
+            ":test_support_tls_material",
             "//protocol:tls_credentials",
             "//utils",
         ],
@@ -19,7 +35,7 @@ cc_tests_from_glob(
             "//protocol:http_transport_detail",
             "//protocol:http_transport",
             "//protocol:runtime_api",
-            "//protocol:test_support_tls_material",
+            ":test_support_tls_material",
             "//protocol:tls_credentials",
             "//utils",
             "@boost//:boost",

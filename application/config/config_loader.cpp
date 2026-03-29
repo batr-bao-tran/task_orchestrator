@@ -439,6 +439,10 @@ ApplicationLaunchConfig parse_service_yaml(const YAML::Node& service_node, const
       launch_config.interfaces.grpc.endpoint.use_tls =
           tls_enabled_by_config(launch_config.interfaces.grpc.endpoint.tls);
     }
+    if (grpc_node["completion_queue_threads"]) {
+      launch_config.interfaces.grpc.endpoint.completion_queue_threads =
+          grpc_node["completion_queue_threads"].as<std::size_t>();
+    }
     if (grpc_node["max_receive_message_bytes"]) {
       launch_config.interfaces.grpc.endpoint.max_receive_message_bytes =
           grpc_node["max_receive_message_bytes"].as<int>();

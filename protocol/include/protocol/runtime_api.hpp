@@ -129,6 +129,7 @@ struct GrpcEndpointOptions {
   int port = kDefaultGrpcPort;
   bool use_tls = false;
   TlsServerConfig tls;
+  std::size_t completion_queue_threads = kDefaultIoThreads;
   int max_receive_message_bytes = static_cast<int>(kDefaultMaxHttpBodyBytes);
   int max_send_message_bytes = static_cast<int>(kDefaultMaxHttpBodyBytes);
 };

@@ -26,8 +26,10 @@ namespace to = task_orchestrator;
 class ScopedTempDirectory final {
  public:
   ScopedTempDirectory() {
-    const auto unique_suffix = std::to_string(::getpid()) + "_" +
-                               std::to_string(std::filesystem::file_time_type::clock::now().time_since_epoch().count());
+    const auto timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                               std::filesystem::file_time_type::clock::now().time_since_epoch())
+                               .count();
+    const auto unique_suffix = std::to_string(::getpid()) + "_" + std::to_string(static_cast<long long>(timestamp));
     path_ = std::filesystem::temp_directory_path() / ("task_orchestrator_application_detail_test_" + unique_suffix);
     std::filesystem::create_directories(path_);
   }
@@ -514,7 +516,7 @@ TEST(ApplicationDetailTest, WorkflowLoadingAndCommandHelpersHandleErrorsAndSucce
   write_file(temp_directory.path() / "workflow.txt", workflow_text("detail_text"));
   write_file(temp_directory.path() / "invalid.txt", "not valid controlled text");
 
-  to::app::InMemoryWorkflowRuntimeService runtime_service({});
+  to::app::InMemoryWorkflowRuntimeService runtime_service(to::protocol::SecurityConfig{});
 
   EXPECT_FALSE(to::app::detail::load_request_workflow({}, temp_directory.path(), logger).has_value());
   EXPECT_FALSE(
@@ -620,7 +622,7 @@ TEST(ApplicationDetailTest, RunCliLoopStopsWhenInputCloses) {
   const ScopedStdinPipe stdin_pipe("help\nquit\n");
   ASSERT_TRUE(stdin_pipe.active());
 
-  to::app::InMemoryWorkflowRuntimeService runtime_service({});
+  to::app::InMemoryWorkflowRuntimeService runtime_service(to::protocol::SecurityConfig{});
   const auto logger = to::app::detail::application_logger();
 
   EXPECT_EQ(EXIT_SUCCESS,
@@ -643,7 +645,7 @@ TEST(ApplicationDetailTest, RunCliLoopProcessesQuitCommandFromReadyInput) {
   const ScopedStdinPipe stdin_pipe("quit\n", false);
   ASSERT_TRUE(stdin_pipe.active());
 
-  to::app::InMemoryWorkflowRuntimeService runtime_service({});
+  to::app::InMemoryWorkflowRuntimeService runtime_service(to::protocol::SecurityConfig{});
   const auto logger = to::app::detail::application_logger();
 
   EXPECT_EQ(EXIT_SUCCESS,
@@ -666,7 +668,7 @@ TEST(ApplicationDetailTest, RunCliLoopStopsOnInterruptAfterPollingTimeout) {
   const ScopedStdinPipe stdin_pipe("", false);
   ASSERT_TRUE(stdin_pipe.active());
 
-  to::app::InMemoryWorkflowRuntimeService runtime_service({});
+  to::app::InMemoryWorkflowRuntimeService runtime_service(to::protocol::SecurityConfig{});
   const auto logger = to::app::detail::application_logger();
   to::app::detail::install_signal_handlers();
 

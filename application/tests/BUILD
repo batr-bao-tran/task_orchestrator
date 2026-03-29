@@ -5,6 +5,17 @@ cc_tests_from_glob(
     default_deps = [
         "@googletest//:gtest_main",
     ],
+    per_test_data = {
+        "application_test.cpp": [
+            "//application/examples:all_examples",
+        ],
+        "config_loader_test.cpp": [
+            "//application/examples:application_config_examples",
+        ],
+        "scenario_warehouse_test.cpp": [
+            "//application/examples:workflow_config_examples",
+        ],
+    },
     per_test_deps = {
         "application_detail_test.cpp": [
             "//application:launcher",
@@ -32,7 +43,7 @@ cc_tests_from_glob(
             "//application:runtime_service",
             "//protocol:grpc_transport",
             "//protocol:http_transport",
-            "//protocol:test_support_tls_material",
+            "//protocol/tests:test_support_tls_material",
             "//protocol:tls_credentials",
         ],
     },

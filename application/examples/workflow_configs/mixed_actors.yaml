@@ -1,0 +1,74 @@
+id: mixed_actors
+optimization:
+  backend: indexed_exact
+  time_limit_ms: 300
+  relative_gap_limit: 0.05
+  num_search_workers: 1
+  allow_partial_plan: true
+actors:
+  - id: robot_picker
+    type: robot
+    capacity: 1
+    capabilities: [lift, scan]
+    execution_cost_per_unit: 1.0
+    windows:
+      - start: 0
+        end: 200
+  - id: robot_loader
+    type: robot
+    capacity: 1
+    capabilities: [lift]
+    execution_cost_per_unit: 1.2
+    windows:
+      - start: 0
+        end: 200
+  - id: pack_station
+    type: machine
+    capacity: 1
+    capabilities: [pack, seal]
+    execution_cost_per_unit: 3.0
+    windows:
+      - start: 40
+        end: 300
+tasks:
+  - id: pick
+    requested_time: 0
+    duration: 25
+    latest_start_time: 10
+    deadline: 80
+    priority: 10
+    allowed_actor_types: [robot]
+    preferred_actor_ids: [robot_picker]
+    required_capabilities: [lift]
+    actor_distances:
+      robot_picker: 1
+      robot_loader: 5
+  - id: inspect
+    requested_time: 5
+    duration: 15
+    deadline: 95
+    priority: 8
+    allowed_actor_ids: [robot_picker]
+    required_capabilities: [scan]
+    dependency_task_ids: [pick]
+  - id: pack
+    requested_time: 20
+    duration: 30
+    latest_start_time: 60
+    deadline: 140
+    priority: 7
+    allowed_actor_types: [machine]
+    preferred_actor_ids: [pack_station]
+    required_capabilities: [pack]
+    dependency_task_ids: [inspect]
+    actor_distances:
+      pack_station: 1
+    phase_durations: [12, 18]
+  - id: seal
+    requested_time: 30
+    duration: 10
+    deadline: 170
+    priority: 5
+    allowed_actor_ids: [pack_station]
+    required_capabilities: [seal]
+    dependency_task_ids: [pack]

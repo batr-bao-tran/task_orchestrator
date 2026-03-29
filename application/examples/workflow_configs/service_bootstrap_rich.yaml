@@ -1,0 +1,102 @@
+id: bootstrap_demo
+optimization:
+  backend: indexed_exact
+  time_limit_ms: 500
+  relative_gap_limit: 0.05
+  num_search_workers: 2
+  allow_partial_plan: true
+  objective:
+    fulfilled_task_weight: 100
+    priority_weight: 20
+    makespan_weight: 2
+    travel_distance_weight: 5
+    tardiness_weight: 10
+    execution_cost_weight: 1
+    preferred_actor_weight: 8
+actors:
+  - id: robot_picker
+    type: robot
+    capacity: 1
+    capabilities: [lift, scan]
+    execution_cost_per_unit: 1.0
+    windows:
+      - start: 0
+        end: 60
+      - start: 80
+        end: 200
+  - id: robot_flex
+    type: robot
+    capacity: 1
+    capabilities: [lift, pack]
+    execution_cost_per_unit: 1.6
+    windows:
+      - start: 0
+        end: 200
+  - id: pack_station
+    type: machine
+    capacity: 1
+    capabilities: [pack, seal]
+    execution_cost_per_unit: 3.5
+    windows:
+      - start: 20
+        end: 200
+tasks:
+  - id: receive
+    requested_time: 0
+    duration: 5
+    latest_start_time: 2
+    deadline: 20
+    priority: 12
+    mandatory: true
+    preemptible: false
+    allowed_actor_types: [robot]
+    preferred_actor_ids: [robot_picker]
+    required_capabilities: [lift]
+    actor_distances:
+      robot_picker: 1
+      robot_flex: 4
+    tardiness_cost_per_unit: 3.0
+    early_start_bonus: 0.5
+    phase_durations: [2, 3]
+  - id: scan
+    requested_time: 0
+    duration: 4
+    deadline: 25
+    priority: 11
+    allowed_actor_ids: [robot_picker]
+    required_capabilities: [scan]
+    dependency_task_ids: [receive]
+    actor_distances:
+      robot_picker: 1
+  - id: pack
+    requested_time: 5
+    duration: 6
+    latest_start_time: 20
+    deadline: 40
+    priority: 8
+    allowed_actor_types: [robot, machine]
+    preferred_actor_ids: [pack_station, robot_flex]
+    required_capabilities: [pack]
+    dependency_task_ids: [scan]
+    actor_distances:
+      robot_flex: 4
+      pack_station: 1
+    tardiness_cost_per_unit: 1.2
+  - id: seal
+    requested_time: 8
+    duration: 4
+    deadline: 50
+    priority: 6
+    allowed_actor_ids: [pack_station]
+    required_capabilities: [seal]
+    dependency_task_ids: [pack]
+  - id: recharge
+    requested_time: 18
+    duration: 10
+    deadline: 100
+    priority: 1
+    mandatory: false
+    preemptible: true
+    allowed_actor_ids: [robot_flex]
+    allowed_actor_types: [robot]
+    dependency_task_ids: [seal]

@@ -58,20 +58,20 @@ The same executable supports two modes.
 Use a structured application config that points at a workflow YAML file or a controlled-language text file.
 
 ```bash
-bazel run //application:run_config -- "$PWD/application/config/examples/one_shot.yaml"
+bazel run //application:run_config -- "$PWD/application/examples/application_configs/one_shot_text_request.yaml"
 ```
 
-The checked-in example looks like this:
+The checked-in one-shot app config looks like this:
 
 ```yaml
 application:
   mode: one_shot
   request:
     kind: workflow_text
-    path: one_shot_request.txt
+    path: ../workflow_requests/quick_pick.workflow.txt
 ```
 
-The request file path is resolved relative to the application config file, so the example can live alongside `one_shot_request.txt`.
+The request path is resolved relative to the application config file, so application configs can point cleanly at `application/examples/workflow_requests/` or `application/examples/workflow_configs/`.
 
 You can also point `kind: workflow_yaml` at a workflow YAML file when you want the one-shot run to execute structured input instead of controlled text.
 
@@ -91,7 +91,7 @@ application:
       require_secure_transport: false
     bootstrap_request:
       kind: workflow_yaml
-      path: service_bootstrap_workflow.yaml
+      path: ../workflow_configs/service_bootstrap_rich.yaml
     interfaces:
       cli:
         enabled: true
@@ -109,7 +109,7 @@ application:
 Run it with:
 
 ```bash
-bazel run //application:run_config -- "$PWD/application/config/examples/serve_multi_endpoint.yaml"
+bazel run //application:run_config -- "$PWD/application/examples/application_configs/serve_http_grpc_cli.yaml"
 ```
 
 Behavior:
@@ -119,10 +119,11 @@ Behavior:
 - the CLI stays interactive until `quit`, `exit`, or an interrupt signal
 - without CLI enabled, the process serves until `SIGINT` or `SIGTERM`
 
-The example configs live in:
+The example tree is organized by purpose:
 
-- `application/config/examples/one_shot.yaml`
-- `application/config/examples/serve_multi_endpoint.yaml`
+- `application/examples/application_configs/`
+- `application/examples/workflow_configs/`
+- `application/examples/workflow_requests/`
 
 The CLI supports:
 
@@ -203,7 +204,7 @@ Build and run the launcher examples:
 
 ```bash
 bazel build //application:run_config
-bazel run //application:run_config -- "$PWD/application/config/examples/one_shot.yaml"
+bazel run //application:run_config -- "$PWD/application/examples/application_configs/one_shot_text_request.yaml"
 ```
 
 Run repo coverage:

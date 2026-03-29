@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <string_view>
 
 #include "config/config.hpp"
 
@@ -14,6 +16,14 @@ std::filesystem::path write_temp_yaml_file(const std::string& file_name, const s
   output << contents;
   output.close();
   return file_path;
+}
+
+std::filesystem::path runfiles_path(std::string_view relative_path) {
+  const char* const test_srcdir = std::getenv("TEST_SRCDIR");
+  const char* const test_workspace = std::getenv("TEST_WORKSPACE");
+  EXPECT_NE(nullptr, test_srcdir);
+  EXPECT_NE(nullptr, test_workspace);
+  return std::filesystem::path(test_srcdir) / test_workspace / relative_path;
 }
 
 TEST(ConfigLoaderTest, ParseYaml) {
@@ -207,6 +217,7 @@ launch:
       enabled: true
       bind_address: 127.0.0.1
       port: 9191
+      completion_queue_threads: 3
       max_receive_message_bytes: 4096
       max_send_message_bytes: 8192
 workflow:
@@ -243,6 +254,7 @@ workflow:
 
   EXPECT_TRUE(launch_config.interfaces.grpc.enabled);
   EXPECT_EQ(9191, launch_config.interfaces.grpc.endpoint.port);
+  EXPECT_EQ(3U, launch_config.interfaces.grpc.endpoint.completion_queue_threads);
   EXPECT_EQ(4096, launch_config.interfaces.grpc.endpoint.max_receive_message_bytes);
   EXPECT_EQ(8192, launch_config.interfaces.grpc.endpoint.max_send_message_bytes);
 
@@ -645,6 +657,26 @@ application:
       to::app::load_application_config_from_file(missing_application_path.c_str());
   EXPECT_FALSE(missing_application.configured);
   EXPECT_FALSE(missing_application.valid());
+}
+
+TEST(ConfigLoaderTest, ExampleApplicationConfigsLoadFromRunfiles) {
+  const to::app::ApplicationConfig one_shot_config = to::app::load_application_config_from_file(
+      runfiles_path("application/examples/application_configs/one_shot_text_request.yaml").c_str());
+  EXPECT_TRUE(one_shot_config.configured);
+  EXPECT_EQ(to::app::ApplicationMode::OneShot, one_shot_config.mode);
+  EXPECT_EQ(to::app::RequestFileKind::WorkflowText, one_shot_config.request.kind);
+  EXPECT_EQ("../workflow_requests/quick_pick.workflow.txt", one_shot_config.request.path);
+
+  const to::app::ApplicationConfig serve_config = to::app::load_application_config_from_file(
+      runfiles_path("application/examples/application_configs/serve_http_grpc_cli.yaml").c_str());
+  EXPECT_TRUE(serve_config.configured);
+  EXPECT_EQ(to::app::ApplicationMode::Serve, serve_config.mode);
+  EXPECT_TRUE(serve_config.service.interfaces.cli.enabled);
+  EXPECT_TRUE(serve_config.service.interfaces.http.enabled);
+  EXPECT_TRUE(serve_config.service.interfaces.grpc.enabled);
+  EXPECT_EQ(4U, serve_config.service.interfaces.http.endpoint.io_threads);
+  EXPECT_EQ(4U, serve_config.service.interfaces.grpc.endpoint.completion_queue_threads);
+  EXPECT_EQ("../workflow_configs/service_bootstrap_rich.yaml", serve_config.service.bootstrap_request.path);
 }
 
 TEST(ConfigLoaderTest, InvalidYamlReturnsEmptyConfig) {

@@ -7,7 +7,7 @@ application:
       require_secure_transport: false
     bootstrap_request:
       kind: workflow_yaml
-      path: service_bootstrap_workflow.yaml
+      path: ../workflow_configs/service_bootstrap_rich.yaml
     interfaces:
       cli:
         enabled: true
@@ -15,8 +15,13 @@ application:
       http:
         enabled: true
         bind_address: 127.0.0.1
-        port: 8080
+        port: 0
+        io_threads: 4
+        max_body_bytes: 2097152
       grpc:
         enabled: true
         bind_address: 127.0.0.1
-        port: 9090
+        port: 0
+        completion_queue_threads: 4
+        max_receive_message_bytes: 2097152
+        max_send_message_bytes: 2097152

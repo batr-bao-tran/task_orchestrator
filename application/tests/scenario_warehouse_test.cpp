@@ -1,10 +1,22 @@
 #include <gtest/gtest.h>
 
+#include <cstdlib>
+#include <filesystem>
+#include <string_view>
+
 #include "config/config.hpp"
 #include "runner/runner.hpp"
 
 namespace {
 namespace to = task_orchestrator;
+
+std::filesystem::path runfiles_path(std::string_view relative_path) {
+  const char* const test_srcdir = std::getenv("TEST_SRCDIR");
+  const char* const test_workspace = std::getenv("TEST_WORKSPACE");
+  EXPECT_NE(nullptr, test_srcdir);
+  EXPECT_NE(nullptr, test_workspace);
+  return std::filesystem::path(test_srcdir) / test_workspace / relative_path;
+}
 
 to::app::TaskConfig make_task(std::string id,
                               to::Time requested_time,
@@ -111,4 +123,49 @@ TEST(ScenarioWarehouseTest, MixedActors) {
   EXPECT_GE(result.assignments.size(), 2U);
   EXPECT_LE(result.assignments.size(), 3U);
 }
+
+struct ExampleWorkflowExpectation {
+  const char* relative_path;
+  bool expect_capacity_issue;
+  std::size_t min_assignments;
+};
+
+class ExampleWorkflowScenarioTest : public ::testing::TestWithParam<ExampleWorkflowExpectation> {};
+
+TEST_P(ExampleWorkflowScenarioTest, WorkflowExampleLoadsAndRuns) {
+  const ExampleWorkflowExpectation expectation = GetParam();
+  const std::filesystem::path workflow_path = runfiles_path(expectation.relative_path);
+
+  const to::app::WorkflowConfig config = to::app::load_config_from_file(workflow_path.c_str());
+  ASSERT_FALSE(config.id.empty()) << workflow_path;
+
+  const to::app::RunResult result = to::app::run(config);
+  EXPECT_TRUE(result.ok) << workflow_path;
+  EXPECT_EQ(expectation.expect_capacity_issue, result.capacity_issue) << workflow_path;
+  EXPECT_GE(result.assignments.size(), expectation.min_assignments) << workflow_path;
+}
+
+INSTANTIATE_TEST_SUITE_P(ApplicationExamples,
+                         ExampleWorkflowScenarioTest,
+                         ::testing::Values(
+                             ExampleWorkflowExpectation{
+                                 .relative_path = "application/examples/workflow_configs/warehouse_simple.yaml",
+                                 .expect_capacity_issue = false,
+                                 .min_assignments = 3U,
+                             },
+                             ExampleWorkflowExpectation{
+                                 .relative_path = "application/examples/workflow_configs/warehouse_capacity_issue.yaml",
+                                 .expect_capacity_issue = true,
+                                 .min_assignments = 2U,
+                             },
+                             ExampleWorkflowExpectation{
+                                 .relative_path = "application/examples/workflow_configs/mixed_actors.yaml",
+                                 .expect_capacity_issue = false,
+                                 .min_assignments = 4U,
+                             },
+                             ExampleWorkflowExpectation{
+                                 .relative_path = "application/examples/workflow_configs/service_bootstrap_rich.yaml",
+                                 .expect_capacity_issue = false,
+                                 .min_assignments = 4U,
+                             }));
 }  // namespace

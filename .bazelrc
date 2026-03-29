@@ -23,6 +23,20 @@ build --copt=-Wno-error=unused-parameter
 build --cxxopt=-Wno-error=unused-parameter
 build --host_cxxopt=-Wno-error=unused-parameter
 
+build:sanitize --compilation_mode=dbg
+build:sanitize --strip=never
+build:sanitize --repo_env=CC=clang
+build:sanitize --repo_env=CXX=clang++
+build:sanitize --copt=-fsanitize=address,undefined
+build:sanitize --cxxopt=-fsanitize=address,undefined
+build:sanitize --linkopt=-fsanitize=address,undefined
+build:sanitize --copt=-fno-omit-frame-pointer
+build:sanitize --cxxopt=-fno-omit-frame-pointer
+build:sanitize --copt=-O1
+build:sanitize --cxxopt=-O1
+test:sanitize --test_env=ASAN_OPTIONS=detect_leaks=1:abort_on_error=1:strict_init_order=1:detect_stack_use_after_return=1
+test:sanitize --test_env=UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
+
 # Test output
 test --test_output=errors
 test --test_summary=short

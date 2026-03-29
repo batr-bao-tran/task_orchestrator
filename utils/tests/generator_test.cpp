@@ -54,6 +54,13 @@ struct GeneratorTraits<std::string> {
 
 using GeneratorTypes = ::testing::Types<int, size_t, std::string>;
 
+to::Generator<std::string> make_labelled_gen(std::string label) {
+  const std::string label_1 = label + "_1";
+  co_yield label_1;
+  const std::string label_2 = label + "_2";
+  co_yield label_2;
+}
+
 template <typename T>
 class GeneratorTypeTest : public ::testing::Test {};
 TYPED_TEST_SUITE(GeneratorTypeTest, GeneratorTypes);
@@ -217,14 +224,9 @@ TEST(GeneratorTest, BarrierSyncThenGeneratePerThread) {
   std::mutex mu;
   std::vector<std::string> order;
 
-  const auto worker = [&](unsigned /* id */, const std::string& label) {
+  const auto worker = [&](unsigned /* id */, std::string label) {
     sync.arrive_and_wait();
-    auto gen = [label]() -> to::Generator<std::string> {
-      const std::string label_1 = label + "_1";
-      co_yield label_1;
-      const std::string label_2 = label + "_2";
-      co_yield label_2;
-    }();
+    auto gen = make_labelled_gen(std::move(label));
     for (const auto& s : gen) {
       std::scoped_lock lock(mu);
       order.push_back(s);

@@ -3,8 +3,13 @@
 
 #include <grpcpp/grpcpp.h>
 
+#include <condition_variable>
+#include <cstddef>
+#include <deque>
+#include <functional>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -16,6 +21,7 @@
 namespace task_orchestrator::protocol::detail {
 
 inline constexpr std::string_view kBearerPrefix = "Bearer ";
+inline constexpr std::size_t kMinimumCompletionQueueThreadCount = 1;
 
 template <typename Result>
 std::future<Result> make_ready_future(Result value) {
@@ -31,6 +37,19 @@ inline RuntimeApiResponse make_transport_error_response(std::string error_messag
   response.mutable_result()->set_ok(false);
   response.mutable_result()->set_error_message(response.error_message());
   return response;
+}
+
+inline WorkflowEvent make_transport_error_event(std::string workflow_id, std::string detail) {
+  WorkflowEvent event;
+  event.set_type(pb::WORKFLOW_EVENT_TYPE_REQUEST_REJECTED);
+  event.set_workflow_id(std::move(workflow_id));
+  event.set_detail(detail);
+  *event.mutable_response() = make_transport_error_response(event.detail());
+  return event;
+}
+
+inline std::size_t effective_cq_thread_count(const std::size_t configured_thread_count) {
+  return std::max(kMinimumCompletionQueueThreadCount, configured_thread_count);
 }
 
 struct GrpcCredentialsBuildResult {
@@ -120,6 +139,118 @@ inline std::optional<RuntimeApiResponse> validate_grpc_client_invocation_state(
     return make_transport_error_response("gRPC transport failed: client stub is not initialized.");
   }
   return std::nullopt;
+}
+
+class AsyncClientStreamState final {
+ public:
+  void push_event(WorkflowEvent event) {
+    {
+      std::scoped_lock lock(mutex_);
+      if (closed_) {
+        return;
+      }
+      pending_events_.push_back(std::move(event));
+    }
+    condition_variable_.notify_one();
+  }
+
+  void close() {
+    {
+      std::scoped_lock lock(mutex_);
+      closed_ = true;
+      cancel_callback_ = {};
+    }
+    condition_variable_.notify_all();
+  }
+
+  [[nodiscard]] std::optional<WorkflowEvent> wait_next() {
+    std::unique_lock lock(mutex_);
+    condition_variable_.wait(lock, [this]() { return closed_ || !pending_events_.empty(); });
+    if (!pending_events_.empty()) {
+      WorkflowEvent event = std::move(pending_events_.front());
+      pending_events_.pop_front();
+      return event;
+    }
+    return std::nullopt;
+  }
+
+  void set_cancel_callback(std::function<void()> cancel_callback) {
+    bool invoke_immediately = false;
+    {
+      std::scoped_lock lock(mutex_);
+      if (closed_) {
+        return;
+      }
+      if (cancel_requested_) {
+        invoke_immediately = true;
+      } else {
+        cancel_callback_ = std::move(cancel_callback);
+      }
+    }
+    if (invoke_immediately && cancel_callback) {
+      cancel_callback();
+    }
+  }
+
+  void clear_cancel_callback() {
+    std::scoped_lock lock(mutex_);
+    cancel_callback_ = {};
+  }
+
+  void request_cancel() {
+    std::function<void()> cancel_callback;
+    {
+      std::scoped_lock lock(mutex_);
+      if (closed_ || cancel_requested_) {
+        return;
+      }
+      cancel_requested_ = true;
+      cancel_callback = cancel_callback_;
+    }
+    if (cancel_callback) {
+      cancel_callback();
+    }
+  }
+
+  [[nodiscard]] bool cancel_requested() const {
+    std::scoped_lock lock(mutex_);
+    return cancel_requested_;
+  }
+
+ private:
+  mutable std::mutex mutex_;
+  std::condition_variable condition_variable_;
+  std::deque<WorkflowEvent> pending_events_;
+  std::function<void()> cancel_callback_;
+  bool closed_ = false;
+  bool cancel_requested_ = false;
+};
+
+class ScopedStreamCancellation final {
+ public:
+  explicit ScopedStreamCancellation(std::shared_ptr<AsyncClientStreamState> stream_state)
+      : stream_state_(std::move(stream_state)) {}
+
+  ~ScopedStreamCancellation() noexcept {
+    if (stream_state_) {
+      stream_state_->request_cancel();
+    }
+  }
+
+  ScopedStreamCancellation(const ScopedStreamCancellation&) = delete;
+  ScopedStreamCancellation& operator=(const ScopedStreamCancellation&) = delete;
+  ScopedStreamCancellation(ScopedStreamCancellation&&) = delete;
+  ScopedStreamCancellation& operator=(ScopedStreamCancellation&&) = delete;
+
+ private:
+  std::shared_ptr<AsyncClientStreamState> stream_state_;
+};
+
+inline WorkflowEventStream make_stream_generator(const std::shared_ptr<AsyncClientStreamState>& stream_state) {
+  const ScopedStreamCancellation cancellation_guard(stream_state);
+  while (const std::optional<WorkflowEvent> event = stream_state->wait_next()) {
+    co_yield *event;
+  }
 }
 
 }  // namespace task_orchestrator::protocol::detail

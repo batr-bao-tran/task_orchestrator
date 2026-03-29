@@ -2,4 +2,4 @@ application:
   mode: one_shot
   request:
     kind: workflow_text
-    path: one_shot_request.txt
+    path: ../workflow_requests/quick_pick.workflow.txt

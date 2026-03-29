@@ -1,0 +1,73 @@
+id: warehouse_capacity_issue
+optimization:
+  backend: indexed_exact
+  time_limit_ms: 200
+  relative_gap_limit: 0.0
+  num_search_workers: 1
+  allow_partial_plan: true
+  objective:
+    fulfilled_task_weight: 100
+    priority_weight: 25
+    makespan_weight: 2
+    travel_distance_weight: 1
+    tardiness_weight: 12
+    execution_cost_weight: 1
+    preferred_actor_weight: 4
+actors:
+  - id: robot_1
+    type: robot
+    capacity: 1
+    capabilities: [lift]
+    execution_cost_per_unit: 1.0
+    windows:
+      - start: 0
+        end: 60
+  - id: robot_2
+    type: robot
+    capacity: 1
+    capabilities: [lift]
+    execution_cost_per_unit: 1.1
+    windows:
+      - start: 0
+        end: 60
+tasks:
+  - id: urgent_1
+    requested_time: 0
+    duration: 35
+    deadline: 40
+    priority: 10
+    allowed_actor_types: [robot]
+    required_capabilities: [lift]
+    actor_distances:
+      robot_1: 1
+      robot_2: 2
+  - id: urgent_2
+    requested_time: 0
+    duration: 35
+    deadline: 40
+    priority: 9
+    allowed_actor_types: [robot]
+    required_capabilities: [lift]
+    actor_distances:
+      robot_1: 2
+      robot_2: 1
+  - id: urgent_3
+    requested_time: 0
+    duration: 35
+    deadline: 45
+    priority: 8
+    allowed_actor_types: [robot]
+    required_capabilities: [lift]
+    actor_distances:
+      robot_1: 2
+      robot_2: 2
+  - id: urgent_4
+    requested_time: 0
+    duration: 35
+    deadline: 45
+    priority: 7
+    allowed_actor_types: [robot]
+    required_capabilities: [lift]
+    actor_distances:
+      robot_1: 3
+      robot_2: 1

@@ -1,0 +1,11 @@
+workflow quick_pick
+actors:
+- actor robot_1 type robot capacity 1 windows 0-120 capabilities lift,scan cost 1.0
+- actor robot_2 type robot capacity 1 windows 0-120 capabilities lift,pack cost 1.6
+- actor station_1 type machine capacity 1 windows 10-120 capabilities pack,seal cost 3.5
+tasks:
+- task pick duration 5 release 0 latest_start 3 deadline 20 priority 12 requires_type robot preferred_actor robot_1 requires_capabilities lift distances robot_1=1,robot_2=4 tardiness_cost 2.0 early_start_bonus 0.5
+- task inspect duration 4 release 0 deadline 25 priority 10 allowed_actor robot_1 depends_on pick requires_capabilities scan
+- task pack duration 6 release 5 deadline 40 priority 8 requires_types robot,machine preferred_actors station_1,robot_2 depends inspect requires_capabilities pack distances robot_2=3,station_1=1 demand 1
+- task seal duration 3 release 10 deadline 50 priority 6 allowed_actor station_1 depends_on pack requires_capabilities seal
+- task recharge duration 8 release 18 deadline 120 priority 1 allowed_actor robot_2 depends_on seal mandatory false preemptible true

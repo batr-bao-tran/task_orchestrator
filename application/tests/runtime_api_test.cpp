@@ -25,9 +25,9 @@
 
 #include "protocol/grpc_transport.hpp"
 #include "protocol/http_transport.hpp"
-#include "protocol/test_support_tls_material.hpp"
 #include "protocol/tls_credentials.hpp"
 #include "runtime_service/in_memory_runtime_service.hpp"
+#include "test_support_tls_material.hpp"
 
 namespace {
 namespace to = task_orchestrator;
@@ -1372,6 +1372,68 @@ TEST(RuntimeApiTest, GrpcStreamingReorchestrateExposesOverrideAndCompletionEvent
   EXPECT_TRUE(events.back().response().ok());
 
   server.stop();
+}
+
+TEST(RuntimeApiTest, GrpcStreamingClientCancellationDoesNotBreakLaterRequests) {
+  to::app::InMemoryWorkflowRuntimeService service(
+      {.mode = tp::AuthMode::ApiKey, .expected_credential = "key-123", .require_secure_transport = false});
+  tp::GrpcWorkflowApiServer server(service,
+                                   {.port = 0,
+                                    .tls = {},
+                                    .completion_queue_threads = 0,
+                                    .max_receive_message_bytes = static_cast<int>(tp::kDefaultMaxHttpBodyBytes),
+                                    .max_send_message_bytes = static_cast<int>(tp::kDefaultMaxHttpBodyBytes)});
+  server.start();
+
+  tp::GrpcWorkflowApiClient client({.host = tp::kDefaultLoopbackAddress,
+                                    .port = endpoint_port(server.endpoint()),
+                                    .use_tls = false,
+                                    .tls = {},
+                                    .deadline_ms = tp::kDefaultRequestTimeoutMs,
+                                    .bearer_token = "",
+                                    .api_key = "key-123"});
+
+  tp::SubmitWorkflowRequest submit_request = make_submit_request();
+  submit_request.clear_auth();
+  {
+    auto stream = client.submit_stream(std::move(submit_request));
+    auto iterator = stream.begin();
+    ASSERT_TRUE(iterator != stream.end());
+    EXPECT_EQ(pb::WORKFLOW_EVENT_TYPE_WORKFLOW_ACCEPTED, (*iterator).type());
+  }
+
+  std::this_thread::sleep_for(kTransportFailurePropagationDelay);
+  tp::SubmitWorkflowRequest second_request = make_submit_request();
+  second_request.clear_auth();
+  second_request.mutable_config()->set_id("runtime_demo_after_cancel");
+  const auto response = client.submit_async(second_request).get();
+  ASSERT_TRUE(response.ok()) << response.error_message();
+  EXPECT_EQ(2, response.result().assignments_size());
+
+  server.stop();
+}
+
+TEST(RuntimeApiTest, GrpcStreamingClientSurfacesTransportFailuresClearly) {
+  to::app::InMemoryWorkflowRuntimeService service;
+  tp::GrpcWorkflowApiServer server(service, {.port = 0, .tls = {}});
+  server.start();
+  const int grpc_port = endpoint_port(server.endpoint());
+  server.stop();
+
+  tp::GrpcWorkflowApiClient client({.host = tp::kDefaultLoopbackAddress,
+                                    .port = grpc_port,
+                                    .use_tls = false,
+                                    .tls = {},
+                                    .deadline_ms = tp::kDefaultRequestTimeoutMs,
+                                    .bearer_token = "",
+                                    .api_key = ""});
+
+  std::vector<tp::WorkflowEvent> events = collect_events(client.submit_stream(make_submit_request()));
+  ASSERT_EQ(1U, events.size());
+  EXPECT_EQ(pb::WORKFLOW_EVENT_TYPE_REQUEST_REJECTED, events.front().type());
+  ASSERT_TRUE(events.front().has_response());
+  EXPECT_FALSE(events.front().response().ok());
+  EXPECT_NE(events.front().response().error_message().find("gRPC transport failed"), std::string::npos);
 }
 
 TEST(RuntimeApiTest, GrpcTlsTransportRoundTripsAndMarksSecureTransport) {

@@ -1,4 +1,3 @@
-# CI: build first, then test and lint
 name: CI
 
 on:
@@ -8,91 +7,189 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BAZEL_VERSION: "8.5.0"
+  BAZEL_CACHE_VERSION: "v1"
+
 jobs:
-  build:
+  linux-build:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-24.04, macos-15]
+        os: [ubuntu-22.04, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install lld (Linux)
-        if: matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-24.04'
+      - name: Install lld
         run: sudo apt-get update && sudo apt-get install -y lld
 
-      - name: Set up Xcode (macOS)
-        if: matrix.os == 'macos-15'
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
+      - name: Compute Bazel cache settings
+        id: bazel-cache
+        run: |
+          echo "cache_dir=${RUNNER_TEMP}/bazel-cache/${{ matrix.os }}" >> "${GITHUB_OUTPUT}"
+          echo "cache_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-${{ matrix.os }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}" >> "${GITHUB_OUTPUT}"
+          echo "restore_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-${{ matrix.os }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-" >> "${GITHUB_OUTPUT}"
 
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
         with:
-          bazel_version: "8.5.0"
+          bazel_version: ${{ env.BAZEL_VERSION }}
+
+      - name: Restore Bazel cache
+        id: restore-bazel-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.cache_key }}
+          restore-keys: |
+            ${{ steps.bazel-cache.outputs.restore_key }}
 
       - name: Build
-        run: |
-          if [ "${{ matrix.os }}" = "ubuntu-22.04" ] || [ "${{ matrix.os }}" = "ubuntu-24.04" ]; then
-            bazel build --config=linux //...
-          else
-            bazel build --config=darwin //...
-          fi
+        env:
+          BAZEL_CI_CACHE_DIR: ${{ steps.bazel-cache.outputs.cache_dir }}
+        run: tools/ci/bazel_ci.sh build --config=linux //...
 
-  test:
-    needs: build
+      - name: Save Bazel cache
+        if: steps.restore-bazel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.cache_key }}
+
+  linux-test:
+    needs: linux-build
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-24.04, macos-15]
+        os: [ubuntu-22.04, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install lld (Linux)
-        if: matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-24.04'
+      - name: Install lld
         run: sudo apt-get update && sudo apt-get install -y lld
 
-      - name: Set up Xcode (macOS)
-        if: matrix.os == 'macos-15'
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
+      - name: Compute Bazel cache settings
+        id: bazel-cache
+        run: |
+          echo "cache_dir=${RUNNER_TEMP}/bazel-cache/${{ matrix.os }}" >> "${GITHUB_OUTPUT}"
+          echo "cache_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-${{ matrix.os }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}" >> "${GITHUB_OUTPUT}"
+          echo "restore_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-${{ matrix.os }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-" >> "${GITHUB_OUTPUT}"
 
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
         with:
-          bazel_version: "8.5.0"
+          bazel_version: ${{ env.BAZEL_VERSION }}
+
+      - name: Restore Bazel cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.cache_key }}
+          restore-keys: |
+            ${{ steps.bazel-cache.outputs.restore_key }}
 
       - name: Test
+        env:
+          BAZEL_CI_CACHE_DIR: ${{ steps.bazel-cache.outputs.cache_dir }}
+        run: tools/ci/bazel_ci.sh test --config=linux //... --test_output=errors
+
+  macos-smoke:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Compute Bazel cache settings
+        id: bazel-cache
         run: |
-          if [ "${{ matrix.os }}" = "ubuntu-22.04" ] || [ "${{ matrix.os }}" = "ubuntu-24.04" ]; then
-            bazel test --config=linux //... --test_output=errors
-          else
-            bazel test --config=darwin //... --test_output=errors
-          fi
+          echo "cache_dir=${RUNNER_TEMP}/bazel-cache/macos-15" >> "${GITHUB_OUTPUT}"
+          echo "cache_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-macos-15-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}" >> "${GITHUB_OUTPUT}"
+          echo "restore_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-macos-15-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Bazel
+        uses: bazel-contrib/setup-bazel@0.8.0
+        with:
+          bazel_version: ${{ env.BAZEL_VERSION }}
+
+      - name: Restore Bazel cache
+        id: restore-bazel-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.cache_key }}
+          restore-keys: |
+            ${{ steps.bazel-cache.outputs.restore_key }}
+
+      - name: Build macOS smoke targets
+        env:
+          BAZEL_CI_CACHE_DIR: ${{ steps.bazel-cache.outputs.cache_dir }}
+        run: |
+          tools/ci/bazel_ci.sh build --config=darwin \
+            //application:run_config \
+            //protocol:http_transport \
+            //protocol:grpc_transport \
+            //task_orchestrator:task_orchestrator
+
+      - name: Run macOS smoke tests
+        env:
+          BAZEL_CI_CACHE_DIR: ${{ steps.bazel-cache.outputs.cache_dir }}
+        run: |
+          tools/ci/bazel_ci.sh test --config=darwin \
+            //application/tests:config_loader_test \
+            //application/tests:application_test \
+            //task_orchestrator/tests/unit:optimizer_test \
+            --test_output=errors
+
+      - name: Save Bazel cache
+        if: steps.restore-bazel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.cache_key }}
 
   lint:
-    needs: build
+    needs: linux-build
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install clang-tidy, clang-format, and Python pip
-        run: sudo apt-get update && sudo apt-get install -y clang-tidy clang-format python3-pip
+      - name: Install lint tools
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy clang-format python3-pip lld
 
-      - name: Install lld (Linux)
-        run: sudo apt-get install -y lld
+      - name: Compute Bazel cache settings
+        id: bazel-cache
+        run: |
+          echo "cache_dir=${RUNNER_TEMP}/bazel-cache/ubuntu-24.04" >> "${GITHUB_OUTPUT}"
+          echo "cache_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-ubuntu-24.04-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}" >> "${GITHUB_OUTPUT}"
+          echo "restore_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-ubuntu-24.04-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-" >> "${GITHUB_OUTPUT}"
 
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
         with:
-          bazel_version: "8.5.0"
+          bazel_version: ${{ env.BAZEL_VERSION }}
 
-      - name: Build (for compile_commands aquery)
-        run: bazel build --config=linux //...
+      - name: Restore Bazel cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.cache_key }}
+          restore-keys: |
+            ${{ steps.bazel-cache.outputs.restore_key }}
+
+      - name: Build compile database inputs
+        env:
+          BAZEL_CI_CACHE_DIR: ${{ steps.bazel-cache.outputs.cache_dir }}
+        run: tools/ci/bazel_ci.sh build --config=linux //...
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -102,24 +199,75 @@ jobs:
       - name: Install pre-commit
         run: pip install pre-commit
 
-      - name: Run pre-commit (lint)
+      - name: Run lint
         run: pre-commit run --all-files
 
-  coverage:
-    needs: build
+  sanitize:
+    needs: linux-build
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install lld (Linux)
-        run: sudo apt-get update && sudo apt-get install -y lld
+      - name: Install clang and lld
+        run: sudo apt-get update && sudo apt-get install -y clang lld
+
+      - name: Compute Bazel cache settings
+        id: bazel-cache
+        run: |
+          echo "cache_dir=${RUNNER_TEMP}/bazel-cache/ubuntu-24.04" >> "${GITHUB_OUTPUT}"
+          echo "cache_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-ubuntu-24.04-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}" >> "${GITHUB_OUTPUT}"
+          echo "restore_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-ubuntu-24.04-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-" >> "${GITHUB_OUTPUT}"
 
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
         with:
-          bazel_version: "8.5.0"
+          bazel_version: ${{ env.BAZEL_VERSION }}
+
+      - name: Restore Bazel cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.cache_key }}
+          restore-keys: |
+            ${{ steps.bazel-cache.outputs.restore_key }}
+
+      - name: Run sanitizer suite
+        env:
+          BAZEL_CI_CACHE_DIR: ${{ steps.bazel-cache.outputs.cache_dir }}
+        run: tools/testing/run_sanitizers.sh
+
+  coverage:
+    needs: linux-build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install lld
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - name: Compute Bazel cache settings
+        id: bazel-cache
+        run: |
+          echo "cache_dir=${RUNNER_TEMP}/bazel-cache/ubuntu-24.04" >> "${GITHUB_OUTPUT}"
+          echo "cache_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-ubuntu-24.04-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}" >> "${GITHUB_OUTPUT}"
+          echo "restore_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-ubuntu-24.04-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Bazel
+        uses: bazel-contrib/setup-bazel@0.8.0
+        with:
+          bazel_version: ${{ env.BAZEL_VERSION }}
+
+      - name: Restore Bazel cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.cache_key }}
+          restore-keys: |
+            ${{ steps.bazel-cache.outputs.restore_key }}
 
       - name: Run coverage
+        env:
+          BAZEL_CI_CACHE_DIR: ${{ steps.bazel-cache.outputs.cache_dir }}
         run: tools/testing/check_coverage.sh 90
 
       - name: Export coverage report

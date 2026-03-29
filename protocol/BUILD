@@ -51,21 +51,6 @@ cc_library(
 )
 
 cc_library(
-    name = "test_support_tls_material",
-    testonly = True,
-    srcs = ["src/test_support_tls_material.cpp"],
-    hdrs = ["include/protocol/test_support_tls_material.hpp"],
-    includes = ["include"],
-    visibility = [
-        "//application/tests:__pkg__",
-        "//protocol/tests:__pkg__",
-    ],
-    deps = [
-        "@@boringssl+//:crypto",
-    ],
-)
-
-cc_library(
     name = "http_transport_detail",
     hdrs = ["src/detail/http_transport_detail.hpp"],
     includes = ["."],

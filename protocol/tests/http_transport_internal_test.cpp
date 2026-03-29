@@ -9,8 +9,8 @@
 #include <string>
 #include <string_view>
 
-#include "protocol/test_support_tls_material.hpp"
 #include "src/detail/http_transport_detail.hpp"
+#include "test_support_tls_material.hpp"
 
 namespace task_orchestrator::protocol {
 namespace {

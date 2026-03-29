@@ -23,8 +23,10 @@ namespace to = task_orchestrator;
 class ScopedTempDirectory final {
  public:
   ScopedTempDirectory() {
-    const auto unique_suffix = std::to_string(::getpid()) + "_" +
-                               std::to_string(std::filesystem::file_time_type::clock::now().time_since_epoch().count());
+    const auto timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                               std::filesystem::file_time_type::clock::now().time_since_epoch())
+                               .count();
+    const auto unique_suffix = std::to_string(::getpid()) + "_" + std::to_string(static_cast<long long>(timestamp));
     path_ = std::filesystem::temp_directory_path() / ("task_orchestrator_application_test_" + unique_suffix);
     std::filesystem::create_directories(path_);
   }
@@ -118,6 +120,14 @@ std::filesystem::path write_file(const std::filesystem::path& path, std::string_
   output << content;
   output.close();
   return path;
+}
+
+std::filesystem::path runfiles_path(std::string_view relative_path) {
+  const char* const test_srcdir = std::getenv("TEST_SRCDIR");
+  const char* const test_workspace = std::getenv("TEST_WORKSPACE");
+  EXPECT_NE(nullptr, test_srcdir);
+  EXPECT_NE(nullptr, test_workspace);
+  return std::filesystem::path(test_srcdir) / test_workspace / relative_path;
 }
 
 std::string workflow_yaml(std::string_view workflow_id) {
@@ -255,6 +265,18 @@ TEST(ApplicationTest, RunFromArgsExecutesOneShotWorkflowYamlFromFile) {
                                                                    "    kind: workflow_yaml\n"
                                                                    "    path: " +
                                                                        workflow_path.filename().string() + "\n");
+
+  const to::app::Application application;
+  std::string executable_name = "run_config";
+  std::string config_path_string = application_config_path.string();
+  std::array<char*, 2> argv = {executable_name.data(), config_path_string.data()};
+
+  EXPECT_EQ(EXIT_SUCCESS, application.run_from_args(static_cast<int>(argv.size()), argv.data()));
+}
+
+TEST(ApplicationTest, RunFromArgsExecutesExampleOneShotApplicationConfig) {
+  const std::filesystem::path application_config_path =
+      runfiles_path("application/examples/application_configs/one_shot_text_request.yaml");
 
   const to::app::Application application;
   std::string executable_name = "run_config";
@@ -701,6 +723,16 @@ TEST(ApplicationTest, RunServeModeProcessesCliCommandsAndBootstrapWorkflow) {
 
   const to::app::Application application;
   EXPECT_EQ(EXIT_SUCCESS, application.run(config, temp_directory.path()));
+}
+
+TEST(ApplicationTest, RunServeModeExecutesExampleServeApplicationConfig) {
+  const ScopedStdinPipe stdin_pipe("status\nquit\n");
+  ASSERT_TRUE(stdin_pipe.active());
+
+  const std::filesystem::path application_config_path =
+      runfiles_path("application/examples/application_configs/serve_http_grpc_cli.yaml");
+
+  EXPECT_EQ(EXIT_SUCCESS, to::app::Application::run_from_file(application_config_path.c_str()));
 }
 
 TEST(ApplicationTest, RunServeModeFailsWhenHttpServerCannotStart) {

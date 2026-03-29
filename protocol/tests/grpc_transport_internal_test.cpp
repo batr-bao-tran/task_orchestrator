@@ -5,8 +5,8 @@
 #include <string>
 #include <vector>
 
-#include "protocol/test_support_tls_material.hpp"
 #include "src/detail/grpc_transport_detail.hpp"
+#include "test_support_tls_material.hpp"
 
 namespace task_orchestrator::protocol {
 namespace {
@@ -142,6 +142,8 @@ TEST(GrpcTransportInternalTest, ErrorResponseAndTargetHelpersAreDeterministic) {
   };
   EXPECT_EQ("service.internal", detail::resolve_expected_peer_name(options, default_peer_config));
   EXPECT_EQ("override.internal", detail::resolve_expected_peer_name(options, override_peer_config));
+  EXPECT_EQ(1U, detail::effective_cq_thread_count(0));
+  EXPECT_EQ(4U, detail::effective_cq_thread_count(4));
 }
 
 TEST(GrpcTransportInternalTest, CredentialFactoriesValidateSuccessAndFailureCases) {
@@ -242,8 +244,7 @@ TEST(GrpcTransportInternalTest, ServerAndClientInitializationFailuresReturnStruc
           .bearer_token = {},
           .api_key = {},
       },
-      failing_client_provider,
-      nullptr);
+      failing_client_provider);
   const auto startup_failure = failing_client.submit_async(tp::SubmitWorkflowRequest{}).get();
   EXPECT_FALSE(startup_failure.ok());
   EXPECT_NE(startup_failure.error_message().find("gRPC transport failed"), std::string::npos);
@@ -273,6 +274,64 @@ TEST(GrpcTransportInternalTest, ServerAndClientInitializationFailuresReturnStruc
   EXPECT_EQ("workflow_demo", reorchestrate_failure_events.front().workflow_id());
   ASSERT_TRUE(reorchestrate_failure_events.front().has_response());
   EXPECT_FALSE(reorchestrate_failure_events.front().response().ok());
+}
+
+TEST(GrpcTransportInternalTest, AsyncClientStreamStateBuffersEventsAndSupportsCancellation) {
+  auto stream_state = std::make_shared<detail::AsyncClientStreamState>();
+
+  WorkflowEvent planned_event;
+  planned_event.set_type(pb::WORKFLOW_EVENT_TYPE_TASK_PLANNED);
+  planned_event.set_workflow_id("workflow_demo");
+  planned_event.set_task_id("pick");
+  stream_state->push_event(planned_event);
+
+  const auto first_event = stream_state->wait_next();
+  ASSERT_TRUE(first_event.has_value());
+  EXPECT_EQ(pb::WORKFLOW_EVENT_TYPE_TASK_PLANNED, first_event->type());
+  EXPECT_EQ("pick", first_event->task_id());
+
+  int cancellation_calls = 0;
+  stream_state->set_cancel_callback([&cancellation_calls]() { ++cancellation_calls; });
+  stream_state->request_cancel();
+  stream_state->request_cancel();
+  EXPECT_TRUE(stream_state->cancel_requested());
+  EXPECT_EQ(1, cancellation_calls);
+
+  stream_state->close();
+  EXPECT_FALSE(stream_state->wait_next().has_value());
+}
+
+TEST(GrpcTransportInternalTest, AsyncClientStreamStateInvokesLateCancellationRegistrationImmediately) {
+  auto stream_state = std::make_shared<detail::AsyncClientStreamState>();
+
+  stream_state->request_cancel();
+  int cancellation_calls = 0;
+  stream_state->set_cancel_callback([&cancellation_calls]() { ++cancellation_calls; });
+  EXPECT_EQ(1, cancellation_calls);
+
+  stream_state->close();
+  stream_state->set_cancel_callback([&cancellation_calls]() { ++cancellation_calls; });
+  EXPECT_EQ(1, cancellation_calls);
+}
+
+TEST(GrpcTransportInternalTest, StreamGeneratorCancelsWhenConsumerStopsEarly) {
+  auto stream_state = std::make_shared<detail::AsyncClientStreamState>();
+  int cancellation_calls = 0;
+  stream_state->set_cancel_callback([&cancellation_calls]() { ++cancellation_calls; });
+
+  WorkflowEvent accepted_event;
+  accepted_event.set_type(pb::WORKFLOW_EVENT_TYPE_WORKFLOW_ACCEPTED);
+  accepted_event.set_workflow_id("workflow_demo");
+  stream_state->push_event(accepted_event);
+
+  {
+    auto stream = detail::make_stream_generator(stream_state);
+    auto iterator = stream.begin();
+    ASSERT_TRUE(iterator != stream.end());
+    EXPECT_EQ(pb::WORKFLOW_EVENT_TYPE_WORKFLOW_ACCEPTED, (*iterator).type());
+  }
+
+  EXPECT_EQ(1, cancellation_calls);
 }
 
 }  // namespace

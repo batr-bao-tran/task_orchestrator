@@ -35,9 +35,6 @@ struct PlannerFsmDef : msm::front::state_machine_def<PlannerFsmDef> {
                   msm::front::Row<Planning, Tick, Planning, msm::front::none, msm::front::none>,
                   msm::front::Row<Idle, Tick, Idle, msm::front::none, msm::front::none>,
                   msm::front::Row<Running, Tick, Running, msm::front::none, msm::front::none>>;
-
-  template <typename Event, typename Fsm>
-  void no_transition(const Event&, Fsm&, int) {}
 };
 
 using planner_fsm_backend = msm::back::state_machine<PlannerFsmDef>;

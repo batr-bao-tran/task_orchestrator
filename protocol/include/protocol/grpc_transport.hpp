@@ -6,7 +6,6 @@
 
 #include "protocol/runtime_api.hpp"
 #include "protocol/tls_credentials.hpp"
-#include "utils/task_executor.hpp"
 
 namespace task_orchestrator::protocol {
 
@@ -37,14 +36,13 @@ class GrpcWorkflowApiServer final : public AsyncGrpcWorkflowApiServer {
   std::unique_ptr<Impl> impl_;
 };
 
-/** @brief Executor-backed asynchronous gRPC client implementation. */
+/** @brief Completion-queue-driven asynchronous gRPC client implementation. */
 class GrpcWorkflowApiClient final : public AsyncGrpcWorkflowApiClient {
  public:
-  /** @brief Construct a gRPC client with optional TLS and executor overrides. */
+  /** @brief Construct a gRPC client with optional TLS credential loading. */
   explicit GrpcWorkflowApiClient(
       GrpcClientOptions options = {},
-      const std::shared_ptr<const TlsCredentialProvider>& tls_provider = make_default_tls_credential_provider(),
-      task_orchestrator::TaskExecutor* task_executor = nullptr);
+      const std::shared_ptr<const TlsCredentialProvider>& tls_provider = make_default_tls_credential_provider());
   ~GrpcWorkflowApiClient() noexcept override;
 
   /** @brief Submit a workflow over gRPC and resolve the final response asynchronously. */

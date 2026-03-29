@@ -5,7 +5,7 @@ set -euo pipefail
 readonly DEFAULT_THRESHOLD_PERCENT="90"
 readonly DEFAULT_BAZEL_VERSION="8.5.0"
 readonly COVERAGE_TARGETS="//..."
-readonly COVERAGE_FILTER='^//application[/:],^//protocol[/:],^//task_orchestrator[/:],^//utils[/:]'
+readonly COVERAGE_FILTER='^//application(?!/tests|/runtime_service/tests)[/:],^//protocol(?!/tests)[/:],^//task_orchestrator(?!/tests|/benchmark)[/:],^//utils(?!/tests)[/:]'
 readonly BASELINE_REPORT_SUFFIX="/_coverage/_baseline_report.dat"
 readonly COVERAGE_REPORT_SUFFIX="/_coverage/_coverage_report.dat"
 
@@ -14,6 +14,10 @@ report_path="${2:-}"
 bazel_version="${USE_BAZEL_VERSION:-$DEFAULT_BAZEL_VERSION}"
 
 bazel_cmd() {
+  if [[ -n "${BAZEL_CI_CACHE_DIR:-}" ]] && [[ -x "tools/ci/bazel_ci.sh" ]]; then
+    USE_BAZEL_VERSION="${bazel_version}" tools/ci/bazel_ci.sh "$@"
+    return
+  fi
   USE_BAZEL_VERSION="${bazel_version}" bazel "$@"
 }
 
