@@ -1,88 +1,127 @@
 #include "runner/runner.hpp"
 
 #include <algorithm>
+#include <iterator>
+#include <optional>
 #include <ranges>
-#include <unordered_map>
-#include <unordered_set>
+#include <tuple>
+#include <utility>
 
-#include "config/config.hpp"
-#include "task_orchestrator/core/actor.hpp"
-#include "task_orchestrator/core/scheduler.hpp"
-#include "task_orchestrator/core/workflow.hpp"
-#include "task_orchestrator/data/phase.hpp"
-#include "task_orchestrator/data/process.hpp"
+#include "task_orchestrator/optimizer/model.hpp"
+#include "task_orchestrator/optimizer/optimizer.hpp"
 
 namespace task_orchestrator::app {
-
 namespace {
-bool actor_type_matches(const std::string& actor_type, const std::vector<std::string>& allowed) {
-  if (allowed.empty()) return true;
-  return std::ranges::find(allowed, actor_type) != allowed.end();
+
+std::optional<Time> optional_time_from_config_value(const Time configured_time) {
+  return configured_time > 0 ? std::optional<Time>(configured_time) : std::nullopt;
 }
+
+optimizer::OptimizationOptions to_options(const WorkflowConfig::OptimizationConfig& config) {
+  optimizer::OptimizationOptions options;
+  options.backend_kind = optimizer::backend_kind_from_string(config.backend);
+  options.time_limit_ms = config.time_limit_ms;
+  options.relative_gap_limit = config.relative_gap_limit;
+  options.num_search_workers = config.num_search_workers;
+  options.allow_partial_plan = config.allow_partial_plan;
+  options.objective.fulfilled_task_weight = config.objective.fulfilled_task_weight;
+  options.objective.priority_weight = config.objective.priority_weight;
+  options.objective.makespan_weight = config.objective.makespan_weight;
+  options.objective.travel_distance_weight = config.objective.travel_distance_weight;
+  options.objective.tardiness_weight = config.objective.tardiness_weight;
+  options.objective.execution_cost_weight = config.objective.execution_cost_weight;
+  options.objective.preferred_actor_weight = config.objective.preferred_actor_weight;
+  return options;
+}
+
+optimizer::OptimizerActor to_optimizer_actor(const ActorConfig& actor_config) {
+  optimizer::OptimizerActor actor{
+      .id = actor_config.id,
+      .type = actor_config.type,
+      .capacity = actor_config.capacity,
+      .availability_windows = {},
+      .capabilities = actor_config.capabilities,
+      .execution_cost_per_unit = actor_config.execution_cost_per_unit,
+  };
+  actor.availability_windows.reserve(actor_config.windows.size());
+  std::ranges::transform(actor_config.windows,
+                         std::back_inserter(actor.availability_windows),
+                         [](const AvailabilityWindowConfig& window_config) {
+                           return AvailabilityWindow{.start = window_config.start, .end = window_config.end};
+                         });
+  return actor;
+}
+
+optimizer::OptimizerTask to_optimizer_task(const TaskConfig& task_config) {
+  return optimizer::OptimizerTask{
+      .id = task_config.id,
+      .duration = task_config.duration,
+      .release_time = task_config.requested_time,
+      .latest_start_time = optional_time_from_config_value(task_config.latest_start_time),
+      .deadline = optional_time_from_config_value(task_config.deadline),
+      .priority = task_config.priority,
+      .demand = task_config.demand,
+      .mandatory = task_config.mandatory,
+      .preemptible = task_config.preemptible,
+      .allowed_actor_types = task_config.allowed_actor_types,
+      .allowed_actor_ids = task_config.allowed_actor_ids,
+      .preferred_actor_ids = task_config.preferred_actor_ids,
+      .required_capabilities = task_config.required_capabilities,
+      .dependency_task_ids = task_config.dependency_task_ids,
+      .mutually_exclusive_task_ids = task_config.mutually_exclusive_task_ids,
+      .actor_distances = task_config.actor_distances,
+      .tardiness_cost_per_unit = task_config.tardiness_cost_per_unit,
+      .early_start_bonus = task_config.early_start_bonus,
+  };
+}
+
+optimizer::OptimizationModel to_model(const WorkflowConfig& config) {
+  optimizer::OptimizationModel model;
+  model.id = config.id;
+  model.actors.reserve(config.actors.size());
+  model.tasks.reserve(config.tasks.size());
+  std::ranges::transform(config.actors, std::back_inserter(model.actors), to_optimizer_actor);
+  std::ranges::transform(config.tasks, std::back_inserter(model.tasks), to_optimizer_task);
+
+  return model;
+}
+
+Assignment to_assignment(const optimizer::OptimizedAssignment& optimized_assignment) {
+  return Assignment{
+      .task_id = optimized_assignment.task_id,
+      .actor_id = optimized_assignment.actor_id,
+      .start_time = optimized_assignment.start_time,
+  };
+}
+
+RunResult to_run_result(const optimizer::OptimizationSolution& solution) {
+  RunResult result;
+  result.ok = solution.ok;
+  result.capacity_issue = !solution.unfulfilled_task_ids.empty();
+  result.unfulfilled_task_ids = solution.unfulfilled_task_ids;
+  result.error_message = solution.error_message;
+  result.assignments.reserve(solution.assignments.size());
+  std::ranges::transform(solution.assignments, std::back_inserter(result.assignments), to_assignment);
+
+  std::ranges::sort(result.assignments, [](const Assignment& lhs, const Assignment& rhs) {
+    return std::tuple(lhs.start_time, lhs.task_id, lhs.actor_id) <
+           std::tuple(rhs.start_time, rhs.task_id, rhs.actor_id);
+  });
+  return result;
+}
+
 }  // namespace
 
-RunResult run(const WorkflowConfig& config) {
-  RunResult result;
-  Workflow w(config.id);
-  ActorRegistry reg;
-  std::unordered_map<std::string, std::string> actor_id_to_type;
+RunResult optimize(const OptimizationRequest& config) {
+  const optimizer::WorkflowOptimizer workflow_optimizer(to_options(config.optimization));
+  return to_run_result(workflow_optimizer.optimize(to_model(config)));
+}
 
-  for (const TaskConfig& t : config.tasks) {
-    w.add_phase(Phase{.id = t.id, .name = t.id, .process_ids = {t.id}, .dependency_phase_ids = {}});
-    Process proc;
-    proc.id = t.id;
-    proc.phase_id = t.id;
-    proc.estimated_duration = t.duration;
-    proc.priority = 0;
-    proc.deadline = t.deadline;
-    w.add_process(std::move(proc));
-  }
+RunResult run(const WorkflowConfig& config) { return optimize(config); }
 
-  for (const ActorConfig& a : config.actors) {
-    actor_id_to_type[a.id] = a.type;
-    Actor actor;
-    actor.id = a.id;
-    actor.capacity = a.capacity;
-    actor.current_load = 0;
-    for (const auto& ww : a.windows) {
-      actor.availability_windows.push_back({.start = ww.start, .end = ww.end});
-    }
-    reg.add(std::move(actor));
-  }
-
-  WorkflowState state;
-  ScheduleResult plan_result = task_orchestrator::Scheduler::plan(w, state, reg, 0);
-
-  result.ok = plan_result.ok;
-
-  std::unordered_map<std::string, std::vector<std::string>> task_allowed_types;
-  for (const TaskConfig& t : config.tasks) {
-    task_allowed_types[t.id] = t.allowed_actor_types;
-  }
-
-  for (const Assignment& a : plan_result.assignments) {
-    auto it = task_allowed_types.find(a.task_id);
-    const std::vector<std::string>& allowed = it != task_allowed_types.end() ? it->second : std::vector<std::string>{};
-    auto at_it = actor_id_to_type.find(a.actor_id);
-    std::string const atype = at_it != actor_id_to_type.end() ? at_it->second : "";
-    if (actor_type_matches(atype, allowed)) {
-      result.assignments.push_back(a);
-    }
-  }
-
-  std::unordered_set<TaskId> assigned;
-  for (const auto& a : result.assignments) {
-    assigned.insert(a.task_id);
-  }
-
-  for (const TaskConfig& t : config.tasks) {
-    if (!assigned.contains(t.id)) {
-      result.unfulfilled_task_ids.push_back(t.id);
-      result.capacity_issue = true;
-    }
-  }
-
-  return result;
+RunResult optimize_text(std::string_view request) {
+  const optimizer::WorkflowOptimizer workflow_optimizer;
+  return to_run_result(workflow_optimizer.optimize_text(request));
 }
 
 }  // namespace task_orchestrator::app

@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package task_orchestrator.protocol.v1;
+
+option cc_enable_arenas = true;
+
+import "task_orchestration_service/task_orchestration.proto";
+
+service WorkflowRuntimeApi {
+  // Unary submission RPC.
+  // RPC: /task_orchestrator.protocol.v1.WorkflowRuntimeApi/SubmitWorkflow
+  // HTTP: POST /v1/workflows:submit
+  // Body: SubmitWorkflowRequest in protobuf binary (application/x-protobuf).
+  // Returns only the final outcome. Use StreamSubmitWorkflow to receive progress events.
+  rpc SubmitWorkflow(SubmitWorkflowRequest) returns (RuntimeApiResponse);
+
+  // Unary re-orchestration RPC.
+  // RPC: /task_orchestrator.protocol.v1.WorkflowRuntimeApi/Reorchestrate
+  // HTTP: POST /v1/workflows/{workflow_id}:reorchestrate
+  // Body: ReorchestrateRequest in protobuf binary (application/x-protobuf).
+  // The path workflow_id must match the body workflow_id when both are provided.
+  // Returns only the final outcome. Use StreamReorchestrate to receive progress events.
+  rpc Reorchestrate(ReorchestrateRequest) returns (RuntimeApiResponse);
+
+  // Server-streaming submission RPC for clients that want progress events and the final result.
+  // RPC: /task_orchestrator.protocol.v1.WorkflowRuntimeApi/StreamSubmitWorkflow
+  rpc StreamSubmitWorkflow(SubmitWorkflowRequest) returns (stream WorkflowEvent);
+
+  // Server-streaming re-orchestration RPC for clients that want progress events and the final result.
+  // RPC: /task_orchestrator.protocol.v1.WorkflowRuntimeApi/StreamReorchestrate
+  rpc StreamReorchestrate(ReorchestrateRequest) returns (stream WorkflowEvent);
+}

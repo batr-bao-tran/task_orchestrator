@@ -1,0 +1,6 @@
+workflow quick_pick
+actors:
+- actor robot_1 type robot capacity 1 windows 0-100 capabilities lift
+tasks:
+- task pick duration 5 release 0 deadline 20 priority 10 requires_type robot
+- task pack duration 4 release 0 deadline 30 priority 6 depends_on pick requires_type robot

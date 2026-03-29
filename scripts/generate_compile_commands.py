@@ -26,8 +26,11 @@ def main() -> int:
         print(r.stderr or r.stdout, file=sys.stderr)
         return r.returncode
     exec_root = root
-    rc = subprocess.run(["bazel", "info", "execution_root"], cwd=root, capture_output=True, text=True, timeout=10)
-    if rc.returncode == 0:
+    try:
+        rc = subprocess.run(["bazel", "info", "execution_root"], cwd=root, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        rc = None
+    if rc is not None and rc.returncode == 0:
         exec_root = Path(rc.stdout.strip())
 
     commands = []

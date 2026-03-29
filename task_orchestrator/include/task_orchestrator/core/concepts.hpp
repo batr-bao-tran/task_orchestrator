@@ -38,4 +38,4 @@ concept PhaseIdRange = std::ranges::range<R> && std::same_as<std::ranges::range_
 
 }  // namespace task_orchestrator
 
-#endif
+#endif  // TASK_ORCHESTRATOR__TASK_ORCHESTRATOR_INCLUDE_TASK_ORCHESTRATOR_CORE__CONCEPTS_HPP_

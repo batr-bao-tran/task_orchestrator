@@ -2,7 +2,8 @@
 #define TASK_ORCHESTRATOR__UTILS_INCLUDE_UTILS__GENERATOR_HPP_
 #include <coroutine>
 #include <exception>
-#include <optional>
+#include <string>
+#include <string_view>
 #include <utility>
 
 namespace task_orchestrator {
@@ -17,7 +18,8 @@ class Generator {
  public:
   struct PromiseType {
     T current_{};
-    std::exception_ptr exception_;
+    bool failed_ = false;
+    std::string error_message_;
 
     Generator get_return_object() { return Generator{std::coroutine_handle<PromiseType>::from_promise(*this)}; }
     std::suspend_always initial_suspend() { return {}; }
@@ -27,34 +29,43 @@ class Generator {
       return {};
     }
     void return_void() {}
-    void unhandled_exception() { exception_ = std::current_exception(); }
+    void unhandled_exception() noexcept {
+      failed_ = true;
+      error_message_ = "Generator coroutine terminated with an unknown exception.";
+      try {
+        std::rethrow_exception(std::current_exception());
+      } catch (const std::exception& exception) {
+        error_message_ = exception.what();
+      } catch (const char* message) {
+        error_message_ = message != nullptr ? message : "Generator coroutine terminated with a null string exception.";
+      } catch (...) {
+        error_message_ = "Generator coroutine terminated with a non-standard exception.";
+      }
+    }
   };
   using promise_type = PromiseType;
+
+  struct Sentinel {};
 
   struct Iterator {
     std::coroutine_handle<PromiseType> handle_;
     bool done_ = false;
 
-    void advance() {
+    void advance() noexcept {
       if (done_) return;
       handle_.resume();
-      if (handle_.done()) {
-        done_ = true;
-        if (handle_.promise().exception_) {
-          std::rethrow_exception(handle_.promise().exception_);
-        }
-      }
+      done_ = handle_.done();
     }
 
     Iterator& operator++() {
       advance();
       return *this;
     }
-    bool operator!=(std::default_sentinel_t) const { return !done_; }
+    bool operator!=(Sentinel) const noexcept { return !done_; }
     const T& operator*() const { return handle_.promise().current_; }
   };
 
-  explicit Generator(std::coroutine_handle<PromiseType> h) : handle_(h) {}
+  explicit Generator(std::coroutine_handle<PromiseType> h) noexcept : handle_(h) {}
   ~Generator() noexcept {
     if (handle_) {
       handle_.destroy();
@@ -71,12 +82,16 @@ class Generator {
     return *this;
   }
 
-  Iterator begin() {
+  Iterator begin() noexcept {
     Iterator it{handle_};
     it.advance();
     return it;
   }
-  std::default_sentinel_t end() const { return {}; }
+  Sentinel end() const noexcept { return {}; }
+  [[nodiscard]] bool failed() const noexcept { return handle_ && handle_.promise().failed_; }
+  [[nodiscard]] std::string_view error_message() const noexcept {
+    return handle_ ? std::string_view(handle_.promise().error_message_) : std::string_view{};
+  }
 
  private:
   std::coroutine_handle<PromiseType> handle_;
@@ -84,4 +99,4 @@ class Generator {
 
 }  // namespace task_orchestrator
 
-#endif
+#endif  // TASK_ORCHESTRATOR__UTILS_INCLUDE_UTILS__GENERATOR_HPP_

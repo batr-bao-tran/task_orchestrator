@@ -32,4 +32,4 @@ struct AvailabilityWindow {
 
 }  // namespace task_orchestrator
 
-#endif
+#endif  // TASK_ORCHESTRATOR__UTILS_INCLUDE_UTILS__TYPES_HPP_

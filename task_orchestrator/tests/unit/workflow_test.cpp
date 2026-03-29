@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include "task_orchestrator/data/phase.hpp"
 #include "task_orchestrator/data/process.hpp"
 
@@ -70,5 +72,30 @@ TEST(WorkflowTest, TaskIdsForPhaseAndProcessForTask) {
   ASSERT_NE(nullptr, w3.process_for_task("P1"));
   ASSERT_NE(nullptr, w3.process_for_task("SP1"));
   EXPECT_EQ(nullptr, w3.process_for_task("unknown"));
+}
+
+TEST(WorkflowTest, PhaseAndProcessIdQueriesReturnRegisteredIds) {
+  to::Workflow workflow("wf_ids");
+  workflow.add_phase(to::Phase{.id = "p1", .name = "P1", .process_ids = {}, .dependency_phase_ids = {}});
+  workflow.add_phase(to::Phase{.id = "p2", .name = "P2", .process_ids = {}, .dependency_phase_ids = {}});
+  workflow.add_process(to::Process{
+      .id = "proc_a", .phase_id = "p1", .sub_process_ids = {}, .estimated_duration = 1, .priority = 0, .deadline = {}});
+  workflow.add_process(to::Process{
+      .id = "proc_b", .phase_id = "p2", .sub_process_ids = {}, .estimated_duration = 1, .priority = 0, .deadline = {}});
+
+  const auto phase_ids = workflow.phase_ids();
+  EXPECT_EQ(2U, phase_ids.size());
+  EXPECT_NE(phase_ids.end(), std::ranges::find(phase_ids, "p1"));
+  EXPECT_NE(phase_ids.end(), std::ranges::find(phase_ids, "p2"));
+
+  const auto process_ids = workflow.process_ids();
+  EXPECT_EQ(2U, process_ids.size());
+  EXPECT_NE(process_ids.end(), std::ranges::find(process_ids, "proc_a"));
+  EXPECT_NE(process_ids.end(), std::ranges::find(process_ids, "proc_b"));
+}
+
+TEST(WorkflowTest, UnknownPhaseHasNoTasks) {
+  to::Workflow workflow("wf_unknown");
+  EXPECT_TRUE(workflow.task_ids_for_phase("missing_phase").empty());
 }
 }  // namespace

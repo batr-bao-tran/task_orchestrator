@@ -14,8 +14,11 @@ namespace task_orchestrator {
 
 enum class ActorRankingCriterion {
   EarliestFeasibleStart,
+  EarliestFeasibleCompletion,
   DistanceToWork,
   UptimeUtilisation,
+  LeastLoaded,
+  PreferredActor,
 };
 
 struct ActorRankingProfile {
@@ -48,6 +51,12 @@ struct WorkflowState {
   std::vector<TaskId> unresumable_tasks;
   /** Optional map for distance-based ranking: task -> actor -> distance. */
   std::unordered_map<TaskId, std::unordered_map<ActorId, Time>> task_actor_distance;
+  /** Optional earliest release time per task. */
+  std::unordered_map<TaskId, Time> task_release_time;
+  /** Optional hard allow-list per task. Empty/missing means any actor may be considered. */
+  std::unordered_map<TaskId, std::vector<ActorId>> task_allowed_actors;
+  /** Optional soft preference list used by ranking. */
+  std::unordered_map<TaskId, std::vector<ActorId>> task_preferred_actors;
   /** Last known assignment owner for each task. */
   std::unordered_map<TaskId, ActorId> task_actor;
   /** Last planned start and end times for task assignments. */
@@ -99,4 +108,4 @@ class Scheduler {
 
 }  // namespace task_orchestrator
 
-#endif
+#endif  // TASK_ORCHESTRATOR__TASK_ORCHESTRATOR_INCLUDE_TASK_ORCHESTRATOR_CORE__SCHEDULER_HPP_

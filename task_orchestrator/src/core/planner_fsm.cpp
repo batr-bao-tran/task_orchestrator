@@ -35,6 +35,9 @@ struct PlannerFsmDef : msm::front::state_machine_def<PlannerFsmDef> {
                   msm::front::Row<Planning, Tick, Planning, msm::front::none, msm::front::none>,
                   msm::front::Row<Idle, Tick, Idle, msm::front::none, msm::front::none>,
                   msm::front::Row<Running, Tick, Running, msm::front::none, msm::front::none>>;
+
+  template <typename Event, typename Fsm>
+  void no_transition(const Event&, Fsm&, int) {}
 };
 
 using planner_fsm_backend = msm::back::state_machine<PlannerFsmDef>;
@@ -56,7 +59,7 @@ struct PlannerStateMachine::Impl {
   }
 };
 
-PlannerStateMachine::PlannerStateMachine() : impl_(new Impl) {}
+PlannerStateMachine::PlannerStateMachine() : impl_(new Impl) { impl_->fsm.start(); }
 
 PlannerStateMachine::~PlannerStateMachine() noexcept { delete impl_; }
 
@@ -82,30 +85,53 @@ std::string PlannerStateMachine::current_state_name() const {
 void PlannerStateMachine::set_state_change_callback(StateChangeCallback cb) { impl_->callback = std::move(cb); }
 
 void PlannerStateMachine::process_event(StartPlanning) {
+  if (impl_->last_known_state != PlannerState::Idle && impl_->last_known_state != PlannerState::Planning &&
+      impl_->last_known_state != PlannerState::Dispatching && impl_->last_known_state != PlannerState::Running) {
+    return;
+  }
   impl_->fsm.process_event(StartPlanning{});
   impl_->update_state(PlannerState::Planning);
 }
 
 void PlannerStateMachine::process_event(ScheduleReady) {
+  if (impl_->last_known_state != PlannerState::Planning) {
+    return;
+  }
   impl_->fsm.process_event(ScheduleReady{});
   impl_->update_state(PlannerState::Dispatching);
 }
 
 void PlannerStateMachine::process_event(DispatchComplete) {
+  if (impl_->last_known_state != PlannerState::Dispatching) {
+    return;
+  }
   impl_->fsm.process_event(DispatchComplete{});
   impl_->update_state(PlannerState::Running);
 }
 
 void PlannerStateMachine::process_event(PhaseComplete) {
+  if (impl_->last_known_state != PlannerState::Planning && impl_->last_known_state != PlannerState::Dispatching &&
+      impl_->last_known_state != PlannerState::Running) {
+    return;
+  }
   impl_->fsm.process_event(PhaseComplete{});
   impl_->update_state(PlannerState::Running);
 }
 
 void PlannerStateMachine::process_event(AllPhasesComplete) {
+  if (impl_->last_known_state != PlannerState::Running) {
+    return;
+  }
   impl_->fsm.process_event(AllPhasesComplete{});
   impl_->update_state(PlannerState::Idle);
 }
 
-void PlannerStateMachine::process_event(Tick) { impl_->fsm.process_event(Tick{}); }
+void PlannerStateMachine::process_event(Tick) {
+  if (impl_->last_known_state != PlannerState::Idle && impl_->last_known_state != PlannerState::Planning &&
+      impl_->last_known_state != PlannerState::Running) {
+    return;
+  }
+  impl_->fsm.process_event(Tick{});
+}
 
 }  // namespace task_orchestrator

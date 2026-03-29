@@ -26,4 +26,16 @@ TEST(ProcessTest, TaskIdsWithSubprocesses) {
   EXPECT_EQ("SP1", tids[1]);
   EXPECT_EQ("SP2", tids[2]);
 }
+
+TEST(ProcessTest, TaskIdsPreserveInsertionOrderForLongerSubprocessChains) {
+  to::Process process{.id = "root",
+                      .phase_id = "phase",
+                      .sub_process_ids = {"child_a", "child_b", "child_c"},
+                      .estimated_duration = 1,
+                      .priority = 0,
+                      .deadline = {}};
+
+  const auto task_ids = process.task_ids();
+  EXPECT_EQ((std::vector<to::TaskId>{"root", "child_a", "child_b", "child_c"}), task_ids);
+}
 }  // namespace
