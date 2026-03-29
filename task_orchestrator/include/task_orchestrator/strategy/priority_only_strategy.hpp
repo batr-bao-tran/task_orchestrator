@@ -21,4 +21,4 @@ class PriorityOnlyStrategy : public SchedulingStrategy {
 
 }  // namespace task_orchestrator
 
-#endif
+#endif  // TASK_ORCHESTRATOR__TASK_ORCHESTRATOR_INCLUDE_TASK_ORCHESTRATOR_STRATEGY__PRIORITY_ONLY_STRATEGY_HPP_

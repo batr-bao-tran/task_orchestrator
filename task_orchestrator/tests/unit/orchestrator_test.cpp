@@ -3,14 +3,21 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <memory>
 
 #include "task_orchestrator/core/actor.hpp"
 #include "task_orchestrator/core/workflow.hpp"
 #include "task_orchestrator/data/phase.hpp"
 #include "task_orchestrator/data/process.hpp"
+#include "task_orchestrator/strategy/scheduling_strategy.hpp"
 
 namespace {
 namespace to = task_orchestrator;
+
+class PreserveOrderStrategy final : public to::SchedulingStrategy {
+ public:
+  void order_tasks(std::vector<to::TaskInfo>&) const override {}
+};
 
 TEST(OrchestratorTest, SetWorkflowAndRegisterActor) {
   to::Orchestrator o;
@@ -57,6 +64,94 @@ TEST(OrchestratorTest, CompletePhase) {
   ASSERT_NE(nullptr, state);
   ASSERT_EQ(1U, state->completed_phases.size());
   EXPECT_EQ("p1", state->completed_phases[0]);
+}
+
+TEST(OrchestratorTest, CompletingAllPhasesReturnsPlannerToIdle) {
+  to::Orchestrator orchestrator;
+  to::Workflow workflow("wf_complete_all");
+  workflow.add_phase(to::Phase{.id = "p1", .name = "P1", .process_ids = {}, .dependency_phase_ids = {}});
+  workflow.add_phase(to::Phase{.id = "p2", .name = "P2", .process_ids = {}, .dependency_phase_ids = {"p1"}});
+  orchestrator.set_workflow(std::move(workflow));
+  orchestrator.register_actor(
+      to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 1000}}, .current_load = 0});
+
+  orchestrator.start();
+  orchestrator.complete_phase("p1");
+  EXPECT_NE(to::PlannerState::Idle, orchestrator.current_planner_state());
+
+  orchestrator.complete_phase("p2");
+  EXPECT_EQ(to::PlannerState::Idle, orchestrator.current_planner_state());
+}
+
+TEST(OrchestratorTest, StrategyConfigurationAndRankingProfileAreAppliedWithoutCrashing) {
+  to::Orchestrator orchestrator;
+  to::Workflow workflow("wf_strategy");
+  workflow.add_phase(to::Phase{.id = "ph", .name = "Ph", .process_ids = {"P1"}, .dependency_phase_ids = {}});
+  workflow.add_process(to::Process{
+      .id = "P1", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 3, .priority = 5, .deadline = {}});
+  orchestrator.set_workflow(std::move(workflow));
+  orchestrator.register_actor(
+      to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  orchestrator.set_scheduling_strategy(nullptr);
+  orchestrator.set_actor_ranking_profile(
+      {.criteria = {to::ActorRankingCriterion::LeastLoaded, to::ActorRankingCriterion::PreferredActor}});
+  orchestrator.set_scheduling_strategy(std::make_unique<PreserveOrderStrategy>());
+
+  orchestrator.start();
+  orchestrator.tick(0);
+  const auto schedule = orchestrator.get_latest_schedule();
+  ASSERT_TRUE(schedule.ok);
+  ASSERT_EQ(1U, schedule.assignments.size());
+  EXPECT_EQ("P1", schedule.assignments.front().task_id);
+}
+
+TEST(OrchestratorTest, TickIsNoOpBeforeStartAndRestartsPlanningFromIdleAfterCompletion) {
+  to::Orchestrator orchestrator;
+  to::Workflow workflow("wf_idle");
+  workflow.add_phase(to::Phase{.id = "only_phase", .name = "Only", .process_ids = {}, .dependency_phase_ids = {}});
+  orchestrator.set_workflow(std::move(workflow));
+  orchestrator.register_actor(
+      to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  orchestrator.tick(0);
+  EXPECT_EQ(to::PlannerState::Idle, orchestrator.current_planner_state());
+
+  orchestrator.start();
+  orchestrator.complete_phase("only_phase");
+  EXPECT_EQ(to::PlannerState::Idle, orchestrator.current_planner_state());
+
+  orchestrator.tick(5);
+  EXPECT_EQ(to::PlannerState::Planning, orchestrator.current_planner_state());
+}
+
+TEST(OrchestratorTest, RestoringActorAvailabilityRequestsReplan) {
+  to::Orchestrator orchestrator;
+  to::Workflow workflow("wf_restore");
+  workflow.add_phase(to::Phase{.id = "ph", .name = "Ph", .process_ids = {"P1"}, .dependency_phase_ids = {}});
+  workflow.add_process(to::Process{
+      .id = "P1", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 2, .priority = 1, .deadline = {}});
+  orchestrator.set_workflow(std::move(workflow));
+  orchestrator.register_actor(
+      to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  orchestrator.start();
+  orchestrator.tick(0);
+  orchestrator.tick(1);
+  const auto* state = orchestrator.workflow_state();
+  ASSERT_NE(nullptr, state);
+  ASSERT_FALSE(state->assigned_tasks.empty());
+  orchestrator.notify_task_failed(state->assigned_tasks.front(), true);
+  orchestrator.set_actor_unavailable("A1", true);
+  orchestrator.tick(2);
+  EXPECT_TRUE(orchestrator.get_latest_schedule().assignments.empty());
+
+  orchestrator.set_actor_unavailable("A1", false);
+  orchestrator.tick(3);
+  const auto replanned = orchestrator.get_latest_schedule();
+  ASSERT_TRUE(replanned.ok);
+  ASSERT_EQ(1U, replanned.assignments.size());
+  EXPECT_EQ("A1", replanned.assignments.front().actor_id);
 }
 
 TEST(OrchestratorTest, UnavailableActorTriggersReplanToAlternativeActor) {

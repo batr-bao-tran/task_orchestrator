@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <barrier>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -114,23 +115,52 @@ TEST(GeneratorTest, EmptyGenerator) {
   EXPECT_EQ(count, 0U);
 }
 
-TEST(GeneratorTest, PropagatesException) {
+TEST(GeneratorTest, CapturesFailureMessageWithoutRethrowing) {
   auto gen = []() -> to::Generator<int> {
     co_yield 1;
     throw std::runtime_error("test error");
-    co_yield 2;
   }();
+
   std::vector<int> seen;
-  // NOLINTNEXTLINE(modernize-type-traits)
-  EXPECT_THROW(
-      {
-        for (int x : gen) {
-          seen.push_back(x);
-        }
-      },
-      std::runtime_error);
-  // NOLINTEND(modernize-type-traits)
-  EXPECT_EQ(seen, std::vector<int>{1});
+  for (int value : gen) {
+    seen.push_back(value);
+  }
+
+  EXPECT_EQ(seen, (std::vector<int>{1}));
+  EXPECT_TRUE(gen.failed());
+  EXPECT_EQ(gen.error_message(), "test error");
+}
+
+TEST(GeneratorTest, CapturesCStringFailureMessageWithoutRethrowing) {
+  auto gen = []() -> to::Generator<int> {
+    throw "c-string error";
+    co_return;
+  }();
+
+  size_t count = 0;
+  for ([[maybe_unused]] int value : gen) {
+    ++count;
+  }
+
+  EXPECT_EQ(0U, count);
+  EXPECT_TRUE(gen.failed());
+  EXPECT_EQ("c-string error", gen.error_message());
+}
+
+TEST(GeneratorTest, CapturesNonStandardExceptionFallbackMessageWithoutRethrowing) {
+  auto gen = []() -> to::Generator<int> {
+    throw 42;
+    co_return;
+  }();
+
+  size_t count = 0;
+  for ([[maybe_unused]] int value : gen) {
+    ++count;
+  }
+
+  EXPECT_EQ(0U, count);
+  EXPECT_TRUE(gen.failed());
+  EXPECT_EQ("Generator coroutine terminated with a non-standard exception.", gen.error_message());
 }
 
 TEST(GeneratorTest, ConcurrentConsumptionWithBarrier) {

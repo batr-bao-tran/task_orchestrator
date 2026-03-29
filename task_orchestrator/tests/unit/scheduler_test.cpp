@@ -9,6 +9,8 @@
 #include "task_orchestrator/core/workflow.hpp"
 #include "task_orchestrator/data/phase.hpp"
 #include "task_orchestrator/data/process.hpp"
+#include "task_orchestrator/strategy/edf_strategy.hpp"
+#include "task_orchestrator/strategy/fifo_strategy.hpp"
 
 namespace {
 namespace to = task_orchestrator;
@@ -222,6 +224,78 @@ TEST(SchedulerTest, RankingSkipsInfeasibleBestAndUsesNext) {
   EXPECT_EQ("A_next", result.assignments[0].actor_id);
 }
 
+TEST(SchedulerTest, RankingCanPreferEarliestCompletionLeastLoadedAndPreferredActor) {
+  to::Workflow w("wf");
+  w.add_phase(to::Phase{.id = "ph", .name = "Ph", .process_ids = {"P1"}, .dependency_phase_ids = {}});
+  w.add_process(to::Process{
+      .id = "P1", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 5, .priority = 0, .deadline = {}});
+
+  to::ActorRegistry reg;
+  reg.add(
+      to::Actor{.id = "A_fast", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+  reg.add(
+      to::Actor{.id = "A_slow", .capacity = 1, .availability_windows = {{.start = 3, .end = 100}}, .current_load = 0});
+
+  to::WorkflowState state;
+  state.task_preferred_actors["P1"] = {"A_fast"};
+
+  const to::ActorRankingProfile profile{.criteria = {to::ActorRankingCriterion::EarliestFeasibleCompletion,
+                                                     to::ActorRankingCriterion::LeastLoaded,
+                                                     to::ActorRankingCriterion::PreferredActor}};
+
+  const auto result = to::Scheduler::plan(w, state, reg, 0, nullptr, &profile);
+  ASSERT_TRUE(result.ok);
+  ASSERT_EQ(1U, result.assignments.size());
+  EXPECT_EQ("A_fast", result.assignments[0].actor_id);
+  EXPECT_EQ(0U, result.ranking_decision_criterion_index.at("P1"));
+}
+
+TEST(SchedulerTest, RankingFallsBackToPreferredActorWhenOtherCriteriaTie) {
+  to::Workflow w("wf");
+  w.add_phase(to::Phase{.id = "ph", .name = "Ph", .process_ids = {"P1"}, .dependency_phase_ids = {}});
+  w.add_process(to::Process{
+      .id = "P1", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 2, .priority = 0, .deadline = {}});
+
+  to::ActorRegistry reg;
+  reg.add(to::Actor{.id = "A1", .capacity = 2, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+  reg.add(to::Actor{.id = "A2", .capacity = 2, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  to::WorkflowState state;
+  state.task_preferred_actors["P1"] = {"A2"};
+  state.actor_load["A1"] = 1;
+  state.actor_load["A2"] = 1;
+
+  const to::ActorRankingProfile profile{.criteria = {to::ActorRankingCriterion::EarliestFeasibleCompletion,
+                                                     to::ActorRankingCriterion::LeastLoaded,
+                                                     to::ActorRankingCriterion::PreferredActor}};
+
+  const auto result = to::Scheduler::plan(w, state, reg, 0, nullptr, &profile);
+  ASSERT_TRUE(result.ok);
+  ASSERT_EQ(1U, result.assignments.size());
+  EXPECT_EQ("A2", result.assignments[0].actor_id);
+  EXPECT_EQ(2U, result.ranking_decision_criterion_index.at("P1"));
+}
+
+TEST(SchedulerTest, MissingActorAndMissedDeadlineProduceNoAssignment) {
+  to::Workflow w("wf");
+  w.add_phase(to::Phase{.id = "ph", .name = "Ph", .process_ids = {"P1", "P2"}, .dependency_phase_ids = {}});
+  w.add_process(to::Process{
+      .id = "P1", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 5, .priority = 0, .deadline = 20});
+  w.add_process(to::Process{
+      .id = "P2", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 10, .priority = 0, .deadline = 3});
+
+  to::ActorRegistry reg;
+  reg.add(
+      to::Actor{.id = "A_real", .capacity = 1, .availability_windows = {{.start = 10, .end = 100}}, .current_load = 0});
+
+  to::WorkflowState state;
+  state.task_allowed_actors["P1"] = {"missing_actor"};
+
+  const auto result = to::Scheduler::plan(w, state, reg, 0);
+  EXPECT_TRUE(result.ok);
+  EXPECT_TRUE(result.assignments.empty());
+}
+
 TEST(SchedulerTest, UnavailableActorsAreExcluded) {
   to::Workflow w("wf");
   w.add_phase(to::Phase{.id = "ph", .name = "Ph", .process_ids = {"P1"}, .dependency_phase_ids = {}});
@@ -236,6 +310,78 @@ TEST(SchedulerTest, UnavailableActorsAreExcluded) {
   state.unavailable_actors = {"A1"};
 
   const auto result = to::Scheduler::plan(w, state, reg, 0);
+  ASSERT_TRUE(result.ok);
+  ASSERT_EQ(1U, result.assignments.size());
+  EXPECT_EQ("A2", result.assignments[0].actor_id);
+}
+
+TEST(SchedulerTest, TaskReleaseTimeDelaysStartTime) {
+  to::Workflow w("wf");
+  w.add_phase(to::Phase{.id = "ph", .name = "Ph", .process_ids = {"P1"}, .dependency_phase_ids = {}});
+  w.add_process(to::Process{
+      .id = "P1", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 3, .priority = 0, .deadline = 20});
+
+  to::ActorRegistry reg;
+  reg.add(to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  to::WorkflowState state;
+  state.task_release_time["P1"] = 7;
+
+  const auto result = to::Scheduler::plan(w, state, reg, 0);
+  ASSERT_TRUE(result.ok);
+  ASSERT_EQ(1U, result.assignments.size());
+  EXPECT_EQ(7, result.assignments[0].start_time);
+}
+
+TEST(SchedulerTest, TaskAllowedActorsRestrictFeasibleCandidates) {
+  to::Workflow w("wf");
+  w.add_phase(to::Phase{.id = "ph", .name = "Ph", .process_ids = {"P1"}, .dependency_phase_ids = {}});
+  w.add_process(to::Process{
+      .id = "P1", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 2, .priority = 0, .deadline = {}});
+
+  to::ActorRegistry reg;
+  reg.add(to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+  reg.add(to::Actor{.id = "A2", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  to::WorkflowState state;
+  state.task_allowed_actors["P1"] = {"A2"};
+
+  const auto result = to::Scheduler::plan(w, state, reg, 0);
+  ASSERT_TRUE(result.ok);
+  ASSERT_EQ(1U, result.assignments.size());
+  EXPECT_EQ("A2", result.assignments[0].actor_id);
+}
+
+TEST(SchedulerTest, DeadlineInfeasibleTaskIsNotAssigned) {
+  to::Workflow w("wf");
+  w.add_phase(to::Phase{.id = "ph", .name = "Ph", .process_ids = {"P1"}, .dependency_phase_ids = {}});
+  w.add_process(to::Process{
+      .id = "P1", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 10, .priority = 0, .deadline = 5});
+
+  to::ActorRegistry reg;
+  reg.add(to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  const auto result = to::Scheduler::plan(w, to::WorkflowState{}, reg, 0);
+  EXPECT_TRUE(result.ok);
+  EXPECT_TRUE(result.assignments.empty());
+}
+
+TEST(SchedulerTest, PreferredActorCriterionBreaksTies) {
+  to::Workflow w("wf");
+  w.add_phase(to::Phase{.id = "ph", .name = "Ph", .process_ids = {"P1"}, .dependency_phase_ids = {}});
+  w.add_process(to::Process{
+      .id = "P1", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 2, .priority = 0, .deadline = {}});
+
+  to::ActorRegistry reg;
+  reg.add(to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+  reg.add(to::Actor{.id = "A2", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  to::WorkflowState state;
+  state.task_preferred_actors["P1"] = {"A2"};
+  const to::ActorRankingProfile profile{
+      .criteria = {to::ActorRankingCriterion::PreferredActor, to::ActorRankingCriterion::EarliestFeasibleStart}};
+
+  const auto result = to::Scheduler::plan(w, state, reg, 0, nullptr, &profile);
   ASSERT_TRUE(result.ok);
   ASSERT_EQ(1U, result.assignments.size());
   EXPECT_EQ("A2", result.assignments[0].actor_id);
@@ -261,5 +407,132 @@ TEST(SchedulerTest, ResumableTaskCanBeReplannedWhileUnresumableCannot) {
   ASSERT_TRUE(result.ok);
   ASSERT_EQ(1U, result.assignments.size());
   EXPECT_EQ("P1", result.assignments[0].task_id);
+}
+
+TEST(SchedulerTest, FifoStrategyOrdersByPhaseThenTaskId) {
+  std::vector<to::TaskInfo> tasks = {
+      {.id = "task_b",
+       .phase_id = "phase_2",
+       .duration = 1,
+       .priority = 0,
+       .release_time = 0,
+       .deadline = std::nullopt},
+      {.id = "task_c",
+       .phase_id = "phase_1",
+       .duration = 1,
+       .priority = 0,
+       .release_time = 0,
+       .deadline = std::nullopt},
+      {.id = "task_a",
+       .phase_id = "phase_1",
+       .duration = 1,
+       .priority = 0,
+       .release_time = 0,
+       .deadline = std::nullopt},
+  };
+
+  to::FIFOStrategy strategy;
+  strategy.order_tasks(tasks);
+
+  ASSERT_EQ(3U, tasks.size());
+  EXPECT_EQ("task_a", tasks[0].id);
+  EXPECT_EQ("task_c", tasks[1].id);
+  EXPECT_EQ("task_b", tasks[2].id);
+}
+
+TEST(SchedulerTest, EdfStrategyPrefersTasksWithDeadlinesWhenPriorityTies) {
+  std::vector<to::TaskInfo> tasks = {
+      {.id = "undated", .phase_id = "phase", .duration = 1, .priority = 5, .release_time = 0, .deadline = std::nullopt},
+      {.id = "dated", .phase_id = "phase", .duration = 1, .priority = 5, .release_time = 0, .deadline = 10},
+  };
+
+  to::EDFStrategy strategy;
+  strategy.order_tasks(tasks);
+
+  ASSERT_EQ(2U, tasks.size());
+  EXPECT_EQ("dated", tasks[0].id);
+  EXPECT_EQ("undated", tasks[1].id);
+}
+
+TEST(SchedulerTest, EarliestFeasibleStartCriterionChoosesSoonestActor) {
+  to::Workflow workflow("wf");
+  workflow.add_phase(to::Phase{.id = "phase", .name = "Phase", .process_ids = {"task"}, .dependency_phase_ids = {}});
+  workflow.add_process(to::Process{.id = "task",
+                                   .phase_id = "phase",
+                                   .sub_process_ids = {},
+                                   .estimated_duration = 2,
+                                   .priority = 0,
+                                   .deadline = {}});
+
+  to::ActorRegistry registry;
+  registry.add(to::Actor{
+      .id = "late_actor", .capacity = 1, .availability_windows = {{.start = 5, .end = 100}}, .current_load = 0});
+  registry.add(to::Actor{
+      .id = "early_actor", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  const to::ActorRankingProfile profile{.criteria = {to::ActorRankingCriterion::EarliestFeasibleStart}};
+  const auto result = to::Scheduler::plan(workflow, to::WorkflowState{}, registry, 0, nullptr, &profile);
+
+  ASSERT_TRUE(result.ok);
+  ASSERT_EQ(1U, result.assignments.size());
+  EXPECT_EQ("early_actor", result.assignments[0].actor_id);
+  EXPECT_EQ(0U, result.ranking_decision_criterion_index.at("task"));
+}
+
+TEST(SchedulerTest, LeastLoadedCriterionUsesStateLoadBeforeActorCurrentLoad) {
+  to::Workflow workflow("wf");
+  workflow.add_phase(to::Phase{.id = "phase", .name = "Phase", .process_ids = {"task"}, .dependency_phase_ids = {}});
+  workflow.add_process(to::Process{.id = "task",
+                                   .phase_id = "phase",
+                                   .sub_process_ids = {},
+                                   .estimated_duration = 2,
+                                   .priority = 0,
+                                   .deadline = {}});
+
+  to::ActorRegistry registry;
+  registry.add(to::Actor{
+      .id = "busy_actor", .capacity = 3, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+  registry.add(to::Actor{
+      .id = "light_actor", .capacity = 3, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  to::WorkflowState state;
+  state.actor_load["busy_actor"] = 2;
+  state.actor_load["light_actor"] = 0;
+
+  const to::ActorRankingProfile profile{.criteria = {to::ActorRankingCriterion::LeastLoaded}};
+  const auto result = to::Scheduler::plan(workflow, state, registry, 0, nullptr, &profile);
+
+  ASSERT_TRUE(result.ok);
+  ASSERT_EQ(1U, result.assignments.size());
+  EXPECT_EQ("light_actor", result.assignments[0].actor_id);
+  EXPECT_EQ(0U, result.ranking_decision_criterion_index.at("task"));
+}
+
+TEST(SchedulerTest, PreferredActorCriterionChoosesPreferredCandidateWhenFeasible) {
+  to::Workflow workflow("wf");
+  workflow.add_phase(to::Phase{.id = "phase", .name = "Phase", .process_ids = {"task"}, .dependency_phase_ids = {}});
+  workflow.add_process(to::Process{.id = "task",
+                                   .phase_id = "phase",
+                                   .sub_process_ids = {},
+                                   .estimated_duration = 2,
+                                   .priority = 0,
+                                   .deadline = {}});
+
+  to::ActorRegistry registry;
+  registry.add(to::Actor{
+      .id = "non_preferred", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+  registry.add(to::Actor{
+      .id = "preferred", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  to::WorkflowState state;
+  state.task_preferred_actors["task"] = {"preferred"};
+
+  const to::ActorRankingProfile profile{.criteria = {to::ActorRankingCriterion::PreferredActor}};
+  const auto result = to::Scheduler::plan(workflow, state, registry, 0, nullptr, &profile);
+
+  ASSERT_TRUE(result.ok);
+  ASSERT_EQ(1U, result.assignments.size());
+  EXPECT_EQ("preferred", result.assignments[0].actor_id);
+  EXPECT_EQ(0U, result.ranking_decision_criterion_index.at("task"));
 }
 }  // namespace

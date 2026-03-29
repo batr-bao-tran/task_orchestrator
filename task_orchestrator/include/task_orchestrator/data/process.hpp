@@ -21,4 +21,4 @@ struct Process {
 
 }  // namespace task_orchestrator
 
-#endif
+#endif  // TASK_ORCHESTRATOR__TASK_ORCHESTRATOR_INCLUDE_TASK_ORCHESTRATOR_DATA__PROCESS_HPP_

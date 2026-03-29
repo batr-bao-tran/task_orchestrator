@@ -51,4 +51,4 @@ class Orchestrator {
 
 }  // namespace task_orchestrator
 
-#endif
+#endif  // TASK_ORCHESTRATOR__TASK_ORCHESTRATOR_INCLUDE_TASK_ORCHESTRATOR_CORE__ORCHESTRATOR_HPP_

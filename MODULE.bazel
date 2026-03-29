@@ -5,14 +5,11 @@ module(
 )
 
 bazel_dep(name = "rules_cc", version = "0.2.17")
+bazel_dep(name = "or-tools", version = "9.15", repo_name = "or_tools")
+bazel_dep(name = "protobuf", version = "32.0")
+bazel_dep(name = "rules_proto_grpc_cpp", version = "5.8.0")
+bazel_dep(name = "spdlog", version = "1.15.3")
 bazel_dep(name = "yaml-cpp", version = "0.8.0.bcr.1")
-
-# Fix googletest with C++20 + GCC 13
-single_version_override(
-    module_name = "googletest",
-    patch_strip = 1,
-    patches = ["//third_party:googletest-cpp20-wchar.patch"],
-)
 
 bazel_dep(name = "googletest", version = "1.17.0.bcr.2", dev_dependency = True)
 

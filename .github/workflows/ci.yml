@@ -6,6 +6,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -30,7 +31,7 @@ jobs:
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
         with:
-          bazel_version: "9.0.0"
+          bazel_version: "8.5.0"
 
       - name: Build
         run: |
@@ -63,7 +64,7 @@ jobs:
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
         with:
-          bazel_version: "9.0.0"
+          bazel_version: "8.5.0"
 
       - name: Test
         run: |
@@ -88,7 +89,7 @@ jobs:
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
         with:
-          bazel_version: "9.0.0"
+          bazel_version: "8.5.0"
 
       - name: Build (for compile_commands aquery)
         run: bazel build --config=linux //...
@@ -103,3 +104,29 @@ jobs:
 
       - name: Run pre-commit (lint)
         run: pre-commit run --all-files
+
+  coverage:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install lld (Linux)
+        run: sudo apt-get update && sudo apt-get install -y lld
+
+      - name: Set up Bazel
+        uses: bazel-contrib/setup-bazel@0.8.0
+        with:
+          bazel_version: "8.5.0"
+
+      - name: Run coverage
+        run: tools/testing/check_coverage.sh 90
+
+      - name: Export coverage report
+        run: cp "$(bazel info output_path)/_coverage/_coverage_report.dat" coverage-report.lcov
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-lcov
+          path: coverage-report.lcov

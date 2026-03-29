@@ -1,0 +1,261 @@
+syntax = "proto3";
+
+package task_orchestrator.protocol.v1;
+
+option cc_enable_arenas = true;
+
+// Availability interval advertised by an actor.
+message AvailabilityWindow {
+  // Workflow time at which the actor becomes available.
+  int64 start = 1;
+  // Workflow time at which the availability interval ends.
+  int64 end = 2;
+}
+
+// Actor definition included in a workflow submission.
+message ActorConfig {
+  // Stable actor identifier used by assignments and overrides.
+  string id = 1;
+  // Logical actor type used for eligibility matching, for example "robot".
+  string type = 2;
+  // Maximum concurrent demand units the actor can execute.
+  optional int32 capacity = 3;
+  // Availability windows during which new work may be assigned.
+  repeated AvailabilityWindow windows = 4;
+  // Capability tags that tasks may require.
+  repeated string capabilities = 5;
+  // Optional per-unit execution cost used by cost-aware objectives.
+  optional double execution_cost_per_unit = 6;
+}
+
+// Task-specific travel or placement cost for a single actor.
+message ActorDistance {
+  // Actor identifier the distance applies to.
+  string actor_id = 1;
+  // Relative distance or travel cost for this task-actor pairing.
+  int64 distance = 2;
+}
+
+// Task definition included in a workflow submission.
+message TaskConfig {
+  // Stable task identifier used by assignments, dependencies, and overrides.
+  string id = 1;
+  // Workflow time at which the task becomes eligible to start.
+  int64 requested_time = 2;
+  // Total task duration in workflow time units.
+  int64 duration = 3;
+  // Latest allowed start time when that constraint is used.
+  int64 latest_start_time = 4;
+  // Preferred or required completion deadline in workflow time units.
+  int64 deadline = 5;
+  // Relative scheduling priority; larger values indicate more important work.
+  int64 priority = 6;
+  // Capacity units consumed while the task is running.
+  optional int32 demand = 7;
+  // Whether the task is required for a valid plan.
+  optional bool mandatory = 8;
+  // Whether the task may be interrupted and resumed later.
+  optional bool preemptible = 9;
+  // Actor types that are allowed to execute this task.
+  repeated string allowed_actor_types = 10;
+  // Specific actor identifiers that are allowed to execute this task.
+  repeated string allowed_actor_ids = 11;
+  // Preferred actor identifiers used as a soft optimization signal.
+  repeated string preferred_actor_ids = 12;
+  // Capability tags an actor must provide to execute this task.
+  repeated string required_capabilities = 13;
+  // Task identifiers that must complete before this task can start.
+  repeated string dependency_task_ids = 14;
+  // Task identifiers that cannot coexist with this task in the same plan.
+  repeated string mutually_exclusive_task_ids = 15;
+  // Task-specific distance or travel costs keyed by actor id.
+  repeated ActorDistance actor_distances = 16;
+  // Penalty applied per unit of tardiness beyond the preferred completion time.
+  double tardiness_cost_per_unit = 17;
+  // Bonus applied when earlier execution is preferred.
+  double early_start_bonus = 18;
+  // Optional per-phase durations for multi-phase task execution.
+  repeated int64 phase_durations = 19;
+}
+
+// Objective weighting knobs used by solver backends.
+message ObjectiveConfig {
+  // Weight applied to the number of fulfilled tasks.
+  optional int64 fulfilled_task_weight = 1;
+  // Weight applied to task priority in the objective.
+  optional int64 priority_weight = 2;
+  // Weight applied to shorter overall makespan.
+  optional int64 makespan_weight = 3;
+  // Weight applied to travel or actor-distance cost.
+  optional int64 travel_distance_weight = 4;
+  // Weight applied to lateness or tardiness penalties.
+  optional int64 tardiness_weight = 5;
+  // Weight applied to execution cost.
+  optional int64 execution_cost_weight = 6;
+  // Weight applied to preferred-actor matches.
+  optional int64 preferred_actor_weight = 7;
+}
+
+// Solver configuration for a workflow request.
+message OptimizationConfig {
+  // Backend name, for example "indexed_exact" or "ortools_cp_sat".
+  optional string backend = 1;
+  // Solver time budget in milliseconds; zero means backend default.
+  optional int64 time_limit_ms = 2;
+  // Relative optimality gap target when supported by the backend.
+  optional double relative_gap_limit = 3;
+  // Search worker count when supported by the backend.
+  optional int32 num_search_workers = 4;
+  // Whether partial plans are allowed when not all tasks fit.
+  optional bool allow_partial_plan = 5;
+  // Objective weighting configuration.
+  ObjectiveConfig objective = 6;
+}
+
+// Complete workflow submission payload.
+message WorkflowConfig {
+  // Stable workflow identifier used for later re-orchestration.
+  string id = 1;
+  // Optimization options for this workflow.
+  OptimizationConfig optimization = 2;
+  // Actor definitions available to the planner.
+  repeated ActorConfig actors = 3;
+  // Task definitions to optimize and orchestrate.
+  repeated TaskConfig tasks = 4;
+}
+
+// Authentication and transport-security context attached to a request.
+message ClientAuthContext {
+  // Bearer token presented by the caller when bearer auth is enabled.
+  string bearer_token = 1;
+  // API key presented by the caller when API-key auth is enabled.
+  string api_key = 2;
+  // Whether the request arrived over a secure transport.
+  bool secure_transport = 3;
+}
+
+// Request to submit a workflow for planning and runtime tracking.
+message SubmitWorkflowRequest {
+  // Workflow to store and optimize.
+  WorkflowConfig config = 1;
+  // Caller authentication and secure-transport context.
+  ClientAuthContext auth = 2;
+  // Whether an existing workflow with the same id may be replaced.
+  optional bool replace_existing = 3;
+}
+
+// Task-level runtime override applied before optional re-orchestration.
+message TaskStateOverride {
+  // Identifier of the task to update.
+  string task_id = 1;
+  // Marks the task completed and removes it from future planning if true.
+  optional bool completed = 2;
+  // Overrides the task release time.
+  optional int64 requested_time = 3;
+  // Overrides the task deadline.
+  optional int64 deadline = 4;
+  // Overrides the task priority.
+  optional int64 priority = 5;
+  // Restricts the task to a single actor for the next planning pass.
+  optional string pinned_actor_id = 6;
+}
+
+// Actor-level runtime override applied before optional re-orchestration.
+message ActorStateOverride {
+  // Identifier of the actor to update.
+  string actor_id = 1;
+  // Marks the actor unavailable for new work when true.
+  optional bool unavailable = 2;
+  // Overrides the actor capacity.
+  optional int32 capacity = 3;
+}
+
+// Request to update a stored workflow and optionally trigger replanning.
+message ReorchestrateRequest {
+  // Identifier of the previously submitted workflow to update.
+  string workflow_id = 1;
+  // Task state changes to apply before replanning.
+  repeated TaskStateOverride task_overrides = 2;
+  // Actor state changes to apply before replanning.
+  repeated ActorStateOverride actor_overrides = 3;
+  // Caller authentication and secure-transport context.
+  ClientAuthContext auth = 4;
+  // Whether the service should immediately run another planning pass.
+  optional bool trigger_reorchestration = 5;
+}
+
+// Final task assignment returned by the planner.
+message Assignment {
+  // Assigned task identifier.
+  string task_id = 1;
+  // Actor selected for the task.
+  string actor_id = 2;
+  // Planned task start time.
+  int64 start_time = 3;
+  // Planned task end time.
+  int64 end_time = 4;
+}
+
+// Final orchestration result returned by the service.
+message RunResult {
+  // Whether planning completed successfully.
+  bool ok = 1;
+  // Whether some work could not be scheduled because of capacity or feasibility limits.
+  bool capacity_issue = 2;
+  // Planned assignments ordered by execution time.
+  repeated Assignment assignments = 3;
+  // Task ids that could not be placed in the final plan.
+  repeated string unfulfilled_task_ids = 4;
+  // Human-readable error message when planning fails.
+  string error_message = 5;
+}
+
+// Top-level service response used by unary RPCs and terminal stream events.
+message RuntimeApiResponse {
+  // Whether the request succeeded at the service boundary.
+  bool ok = 1;
+  // Final orchestration result when the request reached the planner.
+  RunResult result = 2;
+  // Human-readable top-level failure message.
+  string error_message = 3;
+}
+
+// Event types emitted while a workflow request is processed.
+enum WorkflowEventType {
+  // Default zero value; clients should treat it as unspecified.
+  WORKFLOW_EVENT_TYPE_UNSPECIFIED = 0;
+  // The request was rejected before or during planning.
+  WORKFLOW_EVENT_TYPE_REQUEST_REJECTED = 1;
+  // The workflow was accepted and stored by the runtime service.
+  WORKFLOW_EVENT_TYPE_WORKFLOW_ACCEPTED = 2;
+  // A runtime override was applied to a stored workflow.
+  WORKFLOW_EVENT_TYPE_RUNTIME_OVERRIDE_APPLIED = 3;
+  // A task was marked completed by an override.
+  WORKFLOW_EVENT_TYPE_TASK_COMPLETED = 4;
+  // A fresh planning pass has started.
+  WORKFLOW_EVENT_TYPE_REPLANNING_STARTED = 5;
+  // A specific task assignment was produced.
+  WORKFLOW_EVENT_TYPE_TASK_PLANNED = 6;
+  // The request finished and includes a terminal response payload.
+  WORKFLOW_EVENT_TYPE_RUN_FINISHED = 7;
+}
+
+// Progress event emitted by server-side streaming workflow operations.
+message WorkflowEvent {
+  // Type of progress event.
+  WorkflowEventType type = 1;
+  // Workflow identifier associated with the event.
+  string workflow_id = 2;
+  // Task identifier when the event is task-specific.
+  string task_id = 3;
+  // Actor identifier when the event is actor- or assignment-specific.
+  string actor_id = 4;
+  // Planned start time when the event refers to a concrete assignment.
+  int64 start_time = 5;
+  // Planned end time when the event refers to a concrete assignment.
+  int64 end_time = 6;
+  // Human-readable detail describing the event.
+  string detail = 7;
+  // Final response payload for terminal events and transport-visible failures.
+  RuntimeApiResponse response = 8;
+}

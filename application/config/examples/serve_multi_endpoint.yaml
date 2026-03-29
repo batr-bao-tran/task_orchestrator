@@ -1,0 +1,22 @@
+application:
+  mode: serve
+  service:
+    security:
+      mode: api_key
+      expected_credential: local-dev-key
+      require_secure_transport: false
+    bootstrap_request:
+      kind: workflow_yaml
+      path: service_bootstrap_workflow.yaml
+    interfaces:
+      cli:
+        enabled: true
+        prompt: "planner> "
+      http:
+        enabled: true
+        bind_address: 127.0.0.1
+        port: 8080
+      grpc:
+        enabled: true
+        bind_address: 127.0.0.1
+        port: 9090

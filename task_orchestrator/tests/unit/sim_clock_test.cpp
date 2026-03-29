@@ -36,4 +36,14 @@ TEST(SimClockTest, RunUntil) {
   to::SimClock::Time end = clock.run_until(10);
   EXPECT_EQ(end, 2);
 }
+
+TEST(SimClockTest, ClearEventsDropsPendingWork) {
+  to::SimClock clock;
+  clock.schedule_at(1, [](to::SimClock::Time) {});
+  clock.schedule_at(2, [](to::SimClock::Time) {});
+  ASSERT_TRUE(clock.has_pending_events());
+
+  clock.clear_events();
+  EXPECT_FALSE(clock.has_pending_events());
+}
 }  // namespace

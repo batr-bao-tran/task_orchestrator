@@ -19,6 +19,9 @@ build:lld --linkopt=-fuse-ld=lld
 build:lld --host_linkopt=-fuse-ld=lld
 
 build --cxxopt=-Wall --cxxopt=-Wextra
+build --copt=-Wno-error=unused-parameter
+build --cxxopt=-Wno-error=unused-parameter
+build --host_cxxopt=-Wno-error=unused-parameter
 
 # Test output
 test --test_output=errors

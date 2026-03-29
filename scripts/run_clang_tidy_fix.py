@@ -45,6 +45,7 @@ def main() -> int:
     db = ensure_db()
     if db is None:
         return 1
+    db_files = {Path(entry["file"]).resolve() for entry in db}
     suffixes = {".cpp", ".cxx", ".cc", ".c", ".hpp", ".hxx", ".h"}
     # Only skip paths under third_party/ or external/ (external libs separate from our source)
     def skip_external_tu(p: Path) -> bool:
@@ -55,7 +56,7 @@ def main() -> int:
         files = [
             (root / f).resolve()
             for f in argv
-            if Path(f).suffix in suffixes and not skip_external_tu(Path(f))
+            if Path(f).suffix in suffixes and not skip_external_tu(Path(f)) and (root / f).resolve() in db_files
         ]
     else:
         files = [Path(e["file"]) for e in db if not skip_external_tu(Path(e["file"]))]

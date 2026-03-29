@@ -13,17 +13,18 @@ struct TaskInfo {
   PhaseId phase_id;
   Duration duration;
   Priority priority;
+  Time release_time = 0;
   std::optional<Time> deadline;
 };
 
 /** Interface for pluggable scheduling strategies: order pending tasks before assignment. */
 class SchedulingStrategy {
  public:
-  virtual ~SchedulingStrategy() = default;
+  virtual ~SchedulingStrategy() noexcept = default;
   /** Sort \p tasks in the order the scheduler should consider them (first = highest preference). */
   virtual void order_tasks(std::vector<TaskInfo>& tasks) const = 0;
 };
 
 }  // namespace task_orchestrator
 
-#endif
+#endif  // TASK_ORCHESTRATOR__TASK_ORCHESTRATOR_INCLUDE_TASK_ORCHESTRATOR_STRATEGY__SCHEDULING_STRATEGY_HPP_

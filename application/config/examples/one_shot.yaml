@@ -1,0 +1,5 @@
+application:
+  mode: one_shot
+  request:
+    kind: workflow_text
+    path: one_shot_request.txt

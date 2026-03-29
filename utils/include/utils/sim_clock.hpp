@@ -51,4 +51,4 @@ class SimClock {
 
 }  // namespace task_orchestrator
 
-#endif
+#endif  // TASK_ORCHESTRATOR__UTILS_INCLUDE_UTILS__SIM_CLOCK_HPP_

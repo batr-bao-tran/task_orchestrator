@@ -6,6 +6,7 @@
 
 namespace task_orchestrator::app {
 
+/** @brief Final scheduling outcome returned by the runner and optimizer APIs. */
 struct RunResult {
   bool ok = true;
   /** True if at least one task could not be fulfilled (capacity/availability). */
@@ -18,4 +19,4 @@ struct RunResult {
 
 }  // namespace task_orchestrator::app
 
-#endif
+#endif  // TASK_ORCHESTRATOR__APPLICATION_RUNNER_INCLUDE_RUNNER__RUN_RESULT_HPP_

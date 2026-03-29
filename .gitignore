@@ -50,3 +50,7 @@ compile_commands.json
 *.log
 *.tmp
 .cache/
+
+# Benchmark artifacts
+task_orchestrator/benchmark/*.csv
+task_orchestrator/benchmark/results/*.csv
