@@ -1,6 +1,5 @@
 #ifndef TASK_ORCHESTRATOR__UTILS_INCLUDE_UTILS__SIM_CLOCK_HPP_
 #define TASK_ORCHESTRATOR__UTILS_INCLUDE_UTILS__SIM_CLOCK_HPP_
-#include <cstdint>
 #include <functional>
 #include <queue>
 #include <vector>
