@@ -103,6 +103,17 @@ struct ApplicationInterfaceConfig {
   GrpcInterfaceConfig grpc;
 };
 
+/** @brief Durable control-plane settings layered above the runtime API. */
+struct ControlPlaneConfig {
+  bool enabled = false;
+  std::string database_path;
+  bool recover_on_start = true;
+  std::int32_t prune_after_days = 30;
+
+  [[nodiscard]] bool configured() const noexcept { return enabled && !database_path.empty(); }
+  [[nodiscard]] bool pruning_enabled() const noexcept { return prune_after_days > 0; }
+};
+
 /** @brief Supported input file kinds for the application launcher. */
 enum class RequestFileKind {
   None,
@@ -123,6 +134,7 @@ struct ApplicationLaunchConfig {
   bool configured = false;
   protocol::SecurityConfig security;
   ApplicationInterfaceConfig interfaces;
+  ControlPlaneConfig control_plane;
   RequestFileConfig bootstrap_request;
   std::optional<WorkflowConfig> bootstrap_workflow;
 

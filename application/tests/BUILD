@@ -20,12 +20,17 @@ cc_tests_from_glob(
         "application_detail_test.cpp": [
             "//application:launcher",
             "//application:launcher_detail",
+            "//application:runtime_service",
         ],
         "application_test.cpp": [
             "//application:launcher",
         ],
         "config_loader_test.cpp": [
             "//application:config",
+        ],
+        "operator_service_test.cpp": [
+            "//application:operator_service",
+            "//control_plane",
         ],
         "runner_test.cpp": [
             "//application:runner",

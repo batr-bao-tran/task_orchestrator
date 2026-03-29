@@ -13,7 +13,6 @@ namespace task_orchestrator::app {
 class Application final {
  public:
   Application() = default;
-  ~Application() noexcept = default;
 
   Application(const Application&) = delete;
   Application& operator=(const Application&) = delete;

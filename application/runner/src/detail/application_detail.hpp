@@ -9,7 +9,6 @@
 #include "application/config/config.hpp"
 #include "protocol/runtime_api.hpp"
 #include "runner/run_result.hpp"
-#include "runtime_service/in_memory_runtime_service.hpp"
 #include "task_orchestrator/optimizer/model.hpp"
 #include "utils/logger.hpp"
 
@@ -53,16 +52,16 @@ std::optional<WorkflowConfig> load_request_workflow(const RequestFileConfig& req
                                                     const std::shared_ptr<spdlog::logger>& logger);
 bool handle_submit_yaml(const std::string& path,
                         const std::filesystem::path& base_directory,
-                        InMemoryWorkflowRuntimeService& runtime_service,
+                        protocol::WorkflowRuntimeService& runtime_service,
                         const protocol::SecurityConfig& security_config,
                         const std::shared_ptr<spdlog::logger>& logger);
 bool handle_submit_text(const std::string& path,
                         const std::filesystem::path& base_directory,
-                        InMemoryWorkflowRuntimeService& runtime_service,
+                        protocol::WorkflowRuntimeService& runtime_service,
                         const protocol::SecurityConfig& security_config,
                         const std::shared_ptr<spdlog::logger>& logger);
 bool handle_reorchestrate(const std::string& workflow_id,
-                          InMemoryWorkflowRuntimeService& runtime_service,
+                          protocol::WorkflowRuntimeService& runtime_service,
                           const protocol::SecurityConfig& security_config,
                           const std::shared_ptr<spdlog::logger>& logger);
 
@@ -73,7 +72,7 @@ struct ServiceEndpoints {
 
 bool handle_cli_command(const std::string& command_line,
                         const std::filesystem::path& base_directory,
-                        InMemoryWorkflowRuntimeService& runtime_service,
+                        protocol::WorkflowRuntimeService& runtime_service,
                         const protocol::SecurityConfig& security_config,
                         const ServiceEndpoints& endpoints,
                         const std::shared_ptr<spdlog::logger>& logger);
@@ -81,7 +80,7 @@ int run_cli_loop(const std::filesystem::path& base_directory,
                  const CliInterfaceConfig& cli_config,
                  const protocol::SecurityConfig& security_config,
                  const ServiceEndpoints& endpoints,
-                 InMemoryWorkflowRuntimeService& runtime_service,
+                 protocol::WorkflowRuntimeService& runtime_service,
                  const std::shared_ptr<spdlog::logger>& logger);
 int run_one_shot_request(const RequestFileConfig& request_config,
                          const std::filesystem::path& base_directory,

@@ -15,6 +15,7 @@ More architectural context lives in [DESIGN.md](DESIGN.md).
 - Controlled natural-language workflow input for deterministic text-based requests
 - Actor and task overrides during runtime
 - Optional HTTP and gRPC transports with shared auth and TLS configuration
+- Optional SQLite WAL-backed control-plane wrapper for workflow history, plan versions, idempotency, pruning, and recovery
 - Three optimizer backends:
   - `indexed_exact` in the default build
   - `ortools_cp_sat` in the optional-backend build
@@ -135,6 +136,23 @@ The CLI supports:
 - `reorchestrate <workflow_id>`
 - `quit`
 
+### Durable control-plane mode
+
+Service mode can optionally wrap the runtime API in a durable control plane:
+
+```yaml
+application:
+  mode: serve
+  service:
+    control_plane:
+      enabled: true
+      database_path: .task-orchestrator/control-plane/control_plane.sqlite3
+      recover_on_start: true
+      prune_after_days: 30
+```
+
+That wrapper persists workflow records, runtime events, plan versions, audit entries, and idempotency records in a single SQLite WAL database while keeping the existing runtime API contract.
+
 ## Runtime API contract
 
 The canonical wire contract is in [task_orchestration.proto](protocol/proto/task_orchestration.proto) and [task_orchestration_service.proto](protocol/proto/task_orchestration_service.proto). They are the source of truth for:
@@ -211,13 +229,15 @@ bazel run //application:run_config -- "$PWD/application/examples/application_con
 Run repo coverage:
 
 ```bash
-tools/testing/check_coverage.sh 90
+tools/testing/check_coverage.sh 95
 ```
 
 ## Repository layout
 
 - `task_orchestrator/` contains the core library, optimizer backends, benchmarks, and core tests
 - `application/` contains config loading, the runner, the runtime service, and the application binary
+- `control_plane/` contains durable state, lifecycle management, recovery, and integration abstractions
+- `operator_ui/` contains a React operator console scaffold for workflow history and interventions
 - `protocol/` contains the protobuf contract and transport implementations
 - `utils/` contains shared infrastructure such as logging, generators, executors, and clocks
 

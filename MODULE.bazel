@@ -16,3 +16,8 @@ bazel_dep(name = "googletest", version = "1.17.0.bcr.2", dev_dependency = True)
 # Boost: fetch via extension so it's visible to this module
 boost = use_extension("//third_party:boost.bzl", "boost")
 use_repo(boost, "boost")
+
+# SQLiteCpp: vendored through a module extension so the Bazel build gets
+# a pinned wrapper library plus the bundled SQLite amalgamation.
+sqlitecpp = use_extension("//third_party:sqlitecpp.bzl", "sqlitecpp")
+use_repo(sqlitecpp, "sqlitecpp")

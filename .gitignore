@@ -44,6 +44,15 @@ coverage/
 .coverage
 htmlcov/
 
+# Frontend package outputs
+node_modules/
+dist/
+*.tsbuildinfo
+.eslintcache
+.vite/
+operator_ui/vite.config.js
+operator_ui/vite.config.d.ts
+
 compile_commands.json
 
 # Misc

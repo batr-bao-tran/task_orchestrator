@@ -74,6 +74,20 @@ The executable in `application/` is a launcher rather than a one-shot demo. A st
 
 The same config can also preload a bootstrap request when the service starts. Once launched, the process stays alive until interrupted or explicitly exited through the CLI.
 
+### Durable control-plane layer
+
+A control-plane layer exists above the transport-neutral runtime service to guarantee:
+
+- durable workflow records and recovery metadata
+- append-only runtime event history
+- SQLite WAL storage tuned for lifecycle queries and restart recovery
+- plan-version snapshots and assignment diffs
+- lifecycle actions such as pause, resume, cancel, and manual intervention
+- event-storage pruning keyed by kernel `boot_id` and age-based retention
+- integration bindings for inbound triggers and outbound callbacks
+
+This layer composes over the runtime API rather than replacing it. The planner and runtime core remain focused on optimization and orchestration, while the control plane owns persistence, lifecycle queries, and operator-facing history.
+
 The transport contract is defined in [task_orchestration.proto](protocol/proto/task_orchestration.proto) and [task_orchestration_service.proto](protocol/proto/task_orchestration_service.proto). Together they are the source of truth for:
 
 - RPC names
@@ -123,6 +137,8 @@ This is especially important because the repository is intended to support repla
   - core workflow, scheduler, orchestrator, optimizer model, backend interfaces, and backends
 - `application/`
   - YAML loading, runner, in-memory runtime service, and the launcher binary
+- `control_plane/`
+  - durable workflow store, control-plane service wrapper, plan diffing, and integration bindings
 - `protocol/`
   - protobuf schema, transport-neutral interfaces, HTTP transport, and gRPC transport
 - `utils/`

@@ -17,6 +17,7 @@ constexpr const char* const kApplicationSectionName = "application";
 constexpr const char* const kLaunchSectionName = "launch";
 constexpr const char* const kWorkflowSectionName = "workflow";
 constexpr const char* const kServiceSectionName = "service";
+constexpr const char* const kControlPlaneSectionName = "control_plane";
 constexpr Time kDefaultAvailabilityWindowStart = 0;
 constexpr Time kDefaultAvailabilityWindowEnd = 1000000;
 constexpr Time kDefaultDeadlineSlack = 1000;
@@ -449,6 +450,29 @@ ApplicationLaunchConfig parse_service_yaml(const YAML::Node& service_node, const
     }
     if (grpc_node["max_send_message_bytes"]) {
       launch_config.interfaces.grpc.endpoint.max_send_message_bytes = grpc_node["max_send_message_bytes"].as<int>();
+    }
+  }
+
+  const YAML::Node control_plane_node =
+      service_node[kControlPlaneSectionName] && service_node[kControlPlaneSectionName].IsMap()
+          ? service_node[kControlPlaneSectionName]
+          : root[kControlPlaneSectionName];
+  if (control_plane_node && control_plane_node.IsMap()) {
+    if (control_plane_node["enabled"]) {
+      launch_config.control_plane.enabled = control_plane_node["enabled"].as<bool>();
+    } else {
+      launch_config.control_plane.enabled = control_plane_node.size() > 0;
+    }
+    if (control_plane_node["database_path"]) {
+      launch_config.control_plane.database_path = control_plane_node["database_path"].as<std::string>();
+    } else if (control_plane_node["state_directory"]) {
+      launch_config.control_plane.database_path = control_plane_node["state_directory"].as<std::string>();
+    }
+    if (control_plane_node["recover_on_start"]) {
+      launch_config.control_plane.recover_on_start = control_plane_node["recover_on_start"].as<bool>();
+    }
+    if (control_plane_node["prune_after_days"]) {
+      launch_config.control_plane.prune_after_days = control_plane_node["prune_after_days"].as<std::int32_t>();
     }
   }
 

@@ -23,3 +23,11 @@ http_archive(
     strip_prefix = "boost_1_84_0",
     url = "https://archives.boost.io/release/1.84.0/source/boost_1_84_0.tar.bz2",
 )
+
+http_archive(
+    name = "sqlitecpp",
+    build_file = "//third_party:sqlitecpp.BUILD",
+    sha256 = "33bd4372d83bc43117928ee842be64d05e7807f511b5195f85d30015cad9cac6",
+    strip_prefix = "SQLiteCpp-3.3.3",
+    url = "https://github.com/SRombauts/SQLiteCpp/archive/refs/tags/3.3.3.tar.gz",
+)
