@@ -147,7 +147,17 @@ TEST(OrchestratorTest, RestoringActorAvailabilityRequestsReplan) {
   EXPECT_TRUE(orchestrator.get_latest_schedule().assignments.empty());
 
   orchestrator.set_actor_unavailable("A1", false);
+  state = orchestrator.workflow_state();
+  ASSERT_NE(nullptr, state);
+  EXPECT_TRUE(state->assigned_tasks.empty());
+  EXPECT_EQ(std::vector<to::TaskId>({"P1"}), state->resumable_tasks);
+  EXPECT_TRUE(state->unavailable_actors.empty());
+  const auto direct_replanned =
+      to::Scheduler::plan(*orchestrator.workflow(), *state, *orchestrator.actor_registry(), 3);
+  ASSERT_TRUE(direct_replanned.ok);
+  ASSERT_EQ(1U, direct_replanned.assignments.size());
   orchestrator.tick(3);
+  orchestrator.tick(4);
   const auto replanned = orchestrator.get_latest_schedule();
   ASSERT_TRUE(replanned.ok);
   ASSERT_EQ(1U, replanned.assignments.size());
@@ -310,5 +320,52 @@ TEST(OrchestratorTest, LateCompletionTriggersReplanAndPushesScheduleOut) {
   ASSERT_EQ(1U, replanned.assignments.size());
   EXPECT_EQ("P2", replanned.assignments[0].task_id);
   EXPECT_EQ(12, replanned.assignments[0].start_time);
+}
+
+TEST(OrchestratorTest, FutureAssignmentsAreNotDispatchedBeforeTheirStartTime) {
+  to::Orchestrator orchestrator;
+  to::Workflow workflow("wf_future_dispatch");
+  workflow.add_phase(to::Phase{.id = "ph", .name = "Phase", .process_ids = {"P1", "P2"}, .dependency_phase_ids = {}});
+  workflow.add_process(to::Process{
+      .id = "P1", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 5, .priority = 10, .deadline = {}});
+  workflow.add_process(to::Process{
+      .id = "P2", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 4, .priority = 1, .deadline = {}});
+
+  orchestrator.set_workflow(std::move(workflow));
+  orchestrator.register_actor(
+      to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  orchestrator.start();
+  orchestrator.tick(0);  // dispatch work that starts at time 0
+  const auto initial_schedule = orchestrator.get_latest_schedule();
+  ASSERT_TRUE(initial_schedule.ok);
+  ASSERT_EQ(2U, initial_schedule.assignments.size());
+  EXPECT_EQ(0, initial_schedule.assignments[0].start_time);
+  EXPECT_EQ(5, initial_schedule.assignments[1].start_time);
+
+  const auto* state = orchestrator.workflow_state();
+  ASSERT_NE(nullptr, state);
+  EXPECT_EQ(std::vector<to::TaskId>({"P1"}), state->assigned_tasks);
+  EXPECT_FALSE(state->task_actor.contains("P2"));
+
+  orchestrator.tick(4);
+  state = orchestrator.workflow_state();
+  ASSERT_NE(nullptr, state);
+  EXPECT_EQ(std::vector<to::TaskId>({"P1"}), state->assigned_tasks);
+  EXPECT_FALSE(state->task_actor.contains("P2"));
+
+  orchestrator.notify_task_completed("P1", 5);
+  state = orchestrator.workflow_state();
+  ASSERT_NE(nullptr, state);
+  const auto direct_after_completion =
+      to::Scheduler::plan(*orchestrator.workflow(), *state, *orchestrator.actor_registry(), 5);
+  ASSERT_TRUE(direct_after_completion.ok);
+  ASSERT_EQ(1U, direct_after_completion.assignments.size());
+  orchestrator.tick(5);
+  orchestrator.tick(6);
+  state = orchestrator.workflow_state();
+  ASSERT_NE(nullptr, state);
+  EXPECT_TRUE(std::ranges::find(state->assigned_tasks, "P2") != state->assigned_tasks.end());
+  EXPECT_EQ("A1", state->task_actor.at("P2"));
 }
 }  // namespace

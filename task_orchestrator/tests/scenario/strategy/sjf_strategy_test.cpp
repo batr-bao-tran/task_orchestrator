@@ -30,7 +30,7 @@ TEST(SJFStrategyTest, OrdersByDurationThenPriority) {
       .id = "P_mid", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 10, .priority = 5, .deadline = {}});
 
   to::ActorRegistry reg;
-  reg.add(to::Actor{.id = "A1", .capacity = 3, .availability_windows = {{.start = 0, .end = 1000}}, .current_load = 0});
+  reg.add(to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 1000}}, .current_load = 0});
   to::WorkflowState state;
   to::SJFStrategy sjf;
   const auto result = to::Scheduler::plan(w, state, reg, 0, &sjf);
@@ -52,7 +52,7 @@ TEST(SJFStrategyTest, TieBreakByPriorityThenId) {
   w.add_process(to::Process{
       .id = "Pc", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 5, .priority = 10, .deadline = {}});
   to::ActorRegistry reg;
-  reg.add(to::Actor{.id = "A1", .capacity = 3, .availability_windows = {{.start = 0, .end = 1000}}, .current_load = 0});
+  reg.add(to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 1000}}, .current_load = 0});
   to::WorkflowState state;
   const to::SJFStrategy sjf;
   const auto result = to::Scheduler::plan(w, state, reg, 0, &sjf);

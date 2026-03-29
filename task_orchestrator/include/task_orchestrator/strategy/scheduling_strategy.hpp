@@ -1,5 +1,6 @@
 #ifndef TASK_ORCHESTRATOR__TASK_ORCHESTRATOR_INCLUDE_TASK_ORCHESTRATOR_STRATEGY__SCHEDULING_STRATEGY_HPP_
 #define TASK_ORCHESTRATOR__TASK_ORCHESTRATOR_INCLUDE_TASK_ORCHESTRATOR_STRATEGY__SCHEDULING_STRATEGY_HPP_
+#include <cstddef>
 #include <optional>
 #include <vector>
 
@@ -14,7 +15,10 @@ struct TaskInfo {
   Duration duration;
   Priority priority;
   Time release_time = 0;
-  std::optional<Time> deadline;
+  std::optional<Time> deadline = std::nullopt;
+  std::optional<Time> latest_start_time = std::nullopt;
+  int demand = 1;
+  size_t dependency_count = 0;
 };
 
 /** Interface for pluggable scheduling strategies: order pending tasks before assignment. */

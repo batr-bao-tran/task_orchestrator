@@ -19,7 +19,6 @@ using detail::consume_final_response;
 using detail::kRuntimeOverrideAvailabilityEnd;
 using detail::kRuntimeOverrideAvailabilityStart;
 using detail::make_event;
-using detail::make_ready_future;
 using detail::make_response_event;
 using detail::make_runtime_error_response;
 using detail::make_runtime_response;

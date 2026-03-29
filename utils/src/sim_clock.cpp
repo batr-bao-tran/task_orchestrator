@@ -5,7 +5,7 @@
 namespace task_orchestrator {
 
 void SimClock::schedule_at(Time t, EventCallback cb) {
-  queue_.push(Event{.at = t, .seq = next_seq_++, .cb = std::move(cb)});
+  queue_.push(Event{.at = std::max(t, now_), .seq = next_seq_++, .cb = std::move(cb)});
 }
 
 SimClock::Time SimClock::advance_to_next() {
@@ -20,10 +20,13 @@ SimClock::Time SimClock::advance_to_next() {
 }
 
 SimClock::Time SimClock::run_until(Time time_limit) {
+  if (time_limit < now_) {
+    return now_;
+  }
   while (!queue_.empty() && queue_.top().at <= time_limit) {
     advance_to_next();
   }
-  now_ = std::min(now_, time_limit);
+  now_ = std::max(now_, time_limit);
   return now_;
 }
 

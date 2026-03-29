@@ -58,7 +58,11 @@ The internal model is richer than a simple task list. It carries actor eligibili
 
 Planning produces assignments, but the runtime layer is responsible for keeping the workflow consistent after submission. It stores active workflows, applies task and actor overrides, exposes re-orchestration operations, and emits workflow events such as acceptance, replanning, planned tasks, and final run completion.
 
-This runtime layer is deliberately in-memory and transport-neutral. The application service owns workflow state and business behavior, while HTTP and gRPC act as adapters around the same service contract.
+The runtime scheduler evaluates the same non-preemptive feasibility inputs that the optimizer layer sees. That includes actor-type and actor-id allow lists, required capabilities, demand versus capacity, release times, latest-start limits, deadlines, dependency chains, mutual exclusions, preferred actors, execution cost, and travel-distance hints. Internally it builds timed reservations from active work and planned assignments so a busy actor can still receive a future reservation when that is the earliest feasible choice.
+
+The orchestrator only dispatches assignments whose planned start time has arrived and whose predecessor tasks have actually completed. This prevents speculative dependency violations, avoids duplicate dispatch of already-assigned work, and keeps runtime load accounting aligned with task demand instead of assuming every task consumes one unit of capacity.
+
+This runtime layer is in-memory and transport-neutral. The application service owns workflow state and business behavior, while HTTP and gRPC act as adapters around the same service contract. Preemptible tasks remain outside the supported runtime model for now, so runtime planning fails closed if that constraint is requested.
 
 ### Transport and launcher layer
 

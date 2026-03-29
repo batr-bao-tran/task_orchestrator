@@ -593,10 +593,13 @@ struct AsyncGrpcClientImpl {
                           Request current_request,
                           StartRead&& current_start_read,
                           std::shared_ptr<AsyncClientStreamState> stream_state)
-          : impl_(impl), request_(std::move(current_request)), stream_state_(std::move(stream_state)) {
-        impl_.populate_client_context(&context_);
-        stream_state_->set_cancel_callback([this]() { context_.TryCancel(); });
-        reader_ = current_start_read(*impl_.stub, &context_, request_, &impl_.completion_queue);
+          : impl_(impl),
+            request_(std::move(current_request)),
+            stream_state_(std::move(stream_state)),
+            context_(std::make_shared<grpc::ClientContext>()) {
+        impl_.populate_client_context(context_.get());
+        stream_state_->set_cancel_callback([context = context_]() { context->TryCancel(); });
+        reader_ = current_start_read(*impl_.stub, context_.get(), request_, &impl_.completion_queue);
       }
 
       void start() {
@@ -675,7 +678,7 @@ struct AsyncGrpcClientImpl {
       AsyncGrpcClientImpl& impl_;
       Request request_;
       std::shared_ptr<AsyncClientStreamState> stream_state_;
-      grpc::ClientContext context_;
+      std::shared_ptr<grpc::ClientContext> context_;
       WorkflowEvent read_event_;
       grpc::Status status_;
       std::unique_ptr<grpc::ClientAsyncReaderInterface<WorkflowEvent>> reader_;

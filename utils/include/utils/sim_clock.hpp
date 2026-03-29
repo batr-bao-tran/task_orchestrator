@@ -9,7 +9,8 @@
 namespace task_orchestrator {
 
 /** Discrete event simulation clock and event queue.
- *  Events at the same time are executed in FIFO (insertion) order. */
+ *  Events at the same time are executed in FIFO (insertion) order.
+ *  Events scheduled in the past are clamped to the current simulated time so the clock stays monotonic. */
 class SimClock {
  public:
   using Time = task_orchestrator::Time;
@@ -24,10 +25,10 @@ class SimClock {
   /** Schedule a one-off event at time t. */
   void schedule_at(Time t, EventCallback cb);
 
-  /** Advance to the next event time and run all events at that time. Returns new time. */
+  /** Advance to the next queued event and run exactly one callback. Returns the new simulated time. */
   Time advance_to_next();
 
-  /** Run until time limit or no events. Returns final time. */
+  /** Run all events up to \p time_limit and advance through idle gaps. Returns the resulting simulated time. */
   Time run_until(Time time_limit);
 
   void clear_events() {

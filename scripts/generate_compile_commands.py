@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -26,12 +28,44 @@ def main() -> int:
         print(r.stderr or r.stdout, file=sys.stderr)
         return r.returncode
     exec_root = root
+    output_base = None
     try:
         rc = subprocess.run(["bazel", "info", "execution_root"], cwd=root, capture_output=True, text=True, timeout=60)
     except subprocess.TimeoutExpired:
         rc = None
     if rc is not None and rc.returncode == 0:
         exec_root = Path(rc.stdout.strip())
+    try:
+        rc = subprocess.run(["bazel", "info", "output_base"], cwd=root, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        rc = None
+    if rc is not None and rc.returncode == 0:
+        output_base = Path(rc.stdout.strip())
+
+    def rewrite_include_path(path: str) -> str:
+        if output_base is not None and path.startswith("external/"):
+            return str((output_base / path).resolve())
+        return path
+
+    def normalize_arguments(command: str) -> list[str]:
+        args = shlex.split(command)
+        rewritten: list[str] = []
+        path_flags = {"-I", "-isystem", "-iquote"}
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg in path_flags and i + 1 < len(args):
+                rewritten.extend([arg, rewrite_include_path(args[i + 1])])
+                i += 2
+                continue
+            for prefix in ("-I", "-isystem", "-iquote"):
+                if arg.startswith(prefix) and arg != prefix:
+                    rewritten.append(prefix + rewrite_include_path(arg[len(prefix) :]))
+                    break
+            else:
+                rewritten.append(arg)
+            i += 1
+        return rewritten
 
     commands = []
     pat = re.compile(r"action '([^']+)'\s*\n(.*?)(?=action '|\Z)", re.DOTALL)
@@ -59,12 +93,12 @@ def main() -> int:
         path_s = str(file_path)
         if "bazel-out" in path_s or "bazel-bin" in path_s or "/external/" in path_s or "/third_party/" in path_s:
             continue
-        commands.append({"directory": str(exec_root), "command": cmd, "file": path_s})
+        commands.append({"directory": str(exec_root), "arguments": normalize_arguments(cmd), "file": path_s})
 
     out = root / "compile_commands.json"
-    tmp = root / "compile_commands.json.tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=root, prefix="compile_commands.", suffix=".tmp", delete=False) as f:
         json.dump(commands, f, indent=2)
+        tmp = Path(f.name)
     os.replace(tmp, out)
     print("Wrote", len(commands), "entries to", out)
     return 0

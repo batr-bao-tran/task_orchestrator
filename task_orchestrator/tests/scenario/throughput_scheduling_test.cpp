@@ -11,7 +11,7 @@
 namespace {
 namespace to = task_orchestrator;
 
-TEST(ThroughputSchedulingTest, TwoActorsTwoTasks) {
+TEST(ThroughputSchedulingTest, TwoActorsThreeTasksProduceFullFuturePlan) {
   to::Workflow w("wf");
   w.add_phase(to::Phase{.id = "ph", .name = "Ph", .process_ids = {"P1", "P2", "P3"}, .dependency_phase_ids = {}});
   w.add_process(to::Process{
@@ -28,12 +28,21 @@ TEST(ThroughputSchedulingTest, TwoActorsTwoTasks) {
   to::WorkflowState state;
   const auto result = to::Scheduler::plan(w, state, reg, 0);
   ASSERT_TRUE(result.ok);
-  EXPECT_LE(result.assignments.size(), 2U);
+  ASSERT_EQ(3U, result.assignments.size());
   std::set<to::TaskId> assigned;
+  size_t immediate_assignments = 0;
+  size_t deferred_assignments = 0;
   for (const auto& a : result.assignments) {
     EXPECT_EQ(0U, assigned.count(a.task_id));
     assigned.insert(a.task_id);
+    if (a.start_time == 0) {
+      ++immediate_assignments;
+    } else if (a.start_time == 1) {
+      ++deferred_assignments;
+    }
   }
+  EXPECT_EQ(2U, immediate_assignments);
+  EXPECT_EQ(1U, deferred_assignments);
 }
 
 TEST(ThroughputSchedulingTest, PriorityOrder) {
@@ -52,7 +61,8 @@ TEST(ThroughputSchedulingTest, PriorityOrder) {
   to::WorkflowState state;
   const auto result = to::Scheduler::plan(w2, state, reg2, 0);
   ASSERT_TRUE(result.ok);
-  ASSERT_EQ(1U, result.assignments.size());
+  ASSERT_EQ(2U, result.assignments.size());
   EXPECT_EQ("P_high", result.assignments[0].task_id);
+  EXPECT_EQ("P_low", result.assignments[1].task_id);
 }
 }  // namespace

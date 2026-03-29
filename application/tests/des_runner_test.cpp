@@ -71,7 +71,7 @@ TEST(DesRunnerTest, AdvanceToNextAndRun) {
   EXPECT_FALSE(clock.has_pending_events());
 }
 
-TEST(DesRunnerTest, RunUntilWithCapacityIssue) {
+TEST(DesRunnerTest, RunUntilProcessesWorkflowWithoutCapacityIssue) {
   to::SimClock clock;
   clock.clear_events();
   clock.set_time(0);
@@ -92,6 +92,7 @@ TEST(DesRunnerTest, RunUntilWithCapacityIssue) {
     EXPECT_FALSE(r.capacity_issue);
     EXPECT_TRUE(r.unfulfilled_task_ids.empty());
   });
-  clock.run_until(100);
+  EXPECT_EQ(100, clock.run_until(100));
+  EXPECT_EQ(100, clock.current_time());
 }
 }  // namespace

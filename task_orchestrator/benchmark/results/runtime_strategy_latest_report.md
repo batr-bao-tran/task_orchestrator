@@ -1,69 +1,71 @@
 # Runtime Scheduling Strategy Benchmark Report
 
-Seed: `20260328`. Iterations per scenario: `10`.
+Seed: `20260329`. Iterations per scenario: `10`.
 
 ## Criteria verified
 
 - `mean_latency_ns` / `p95_latency_ns`: planning responsiveness and latency tail behavior.
 - `completion_ratio` and `mean_makespan`: throughput and runtime completion quality.
 - `deadline_miss_rate` and `mean_tardiness`: deadline resilience during disruption.
+- `constraint_violation_rate`: share of dispatched assignments that violated runtime feasibility checks.
 - `mean_assignment_churn` and `mean_replans`: plan stability under replanning pressure.
 - `mean_utilization`: actor busy-capacity divided by total declared actor capacity in dynamic scenarios.
+- `preferred_actor_hit_ratio`, `mean_travel_distance`, and `mean_execution_cost`: affinity, locality, and cost quality under runtime replanning.
 
 ## Strategy scenarios
 
-| Scenario | Goal | Chaotic | Strategy | Mean latency (ns) | P95 latency (ns) | Completion ratio | Deadline miss rate | Mean tardiness | Mean makespan | Utilization | Assignment churn | Replans | OK |
-|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
-|throughput_release_contention_responsiveness_balanced_release_waves|throughput|no|EDF|2867.16|4117.00|1.00|0.00|0.00|17.80|0.77|0.97|7.50|yes|
-|throughput_release_contention_responsiveness_balanced_release_waves|throughput|no|FIFO|2540.33|3736.00|1.00|0.00|0.00|15.70|0.88|0.99|7.30|yes|
-|throughput_release_contention_responsiveness_balanced_release_waves|throughput|no|SJF|2699.47|3886.00|1.00|0.00|0.00|19.50|0.70|0.96|6.90|yes|
-|throughput_release_contention_responsiveness_balanced_release_waves|throughput|no|PriorityOnly|2582.45|3485.00|1.00|0.00|0.00|17.80|0.77|0.97|7.50|yes|
-|throughput_release_contention_responsiveness_chaotic_release_storm|throughput|yes|EDF|4613.35|7341.00|1.00|0.00|0.00|20.10|0.68|0.97|11.00|yes|
-|throughput_release_contention_responsiveness_chaotic_release_storm|throughput|yes|FIFO|4532.75|7313.00|1.00|0.00|0.00|19.20|0.72|0.99|10.40|yes|
-|throughput_release_contention_responsiveness_chaotic_release_storm|throughput|yes|SJF|4451.81|7017.00|1.00|0.00|0.00|20.30|0.68|0.97|10.60|yes|
-|throughput_release_contention_responsiveness_chaotic_release_storm|throughput|yes|PriorityOnly|4250.81|6565.00|1.00|0.00|0.00|20.50|0.67|0.97|10.50|yes|
-|deadline_resilience_with_actor_flapping_moderate_gap|deadlines|yes|EDF|1886.17|2852.00|1.00|0.00|0.00|20.00|0.77|1.00|7.30|yes|
-|deadline_resilience_with_actor_flapping_moderate_gap|deadlines|yes|FIFO|1791.90|2564.00|1.00|0.00|0.00|20.00|0.77|1.00|7.30|yes|
-|deadline_resilience_with_actor_flapping_moderate_gap|deadlines|yes|SJF|1956.30|2753.00|0.93|0.00|0.00|18.90|0.74|1.00|6.60|yes|
-|deadline_resilience_with_actor_flapping_moderate_gap|deadlines|yes|PriorityOnly|1732.17|2404.00|1.00|0.00|0.00|20.00|0.77|1.00|7.30|yes|
-|deadline_resilience_with_actor_flapping_severe_flapping_gap|deadlines|yes|EDF|2307.47|3096.00|0.99|0.00|0.00|26.60|0.76|1.00|9.30|yes|
-|deadline_resilience_with_actor_flapping_severe_flapping_gap|deadlines|yes|FIFO|2336.37|3055.00|0.99|0.00|0.00|26.60|0.76|1.00|9.30|yes|
-|deadline_resilience_with_actor_flapping_severe_flapping_gap|deadlines|yes|SJF|2628.69|3286.00|0.82|0.00|0.00|23.20|0.68|1.00|6.70|yes|
-|deadline_resilience_with_actor_flapping_severe_flapping_gap|deadlines|yes|PriorityOnly|2528.58|3232.00|0.99|0.00|0.00|26.60|0.76|1.00|9.30|yes|
-|replanning_stability_under_resumable_failures_dual_failure_wave|stability|yes|EDF|1602.25|2790.00|1.00|0.00|0.00|16.90|0.63|1.00|8.50|yes|
-|replanning_stability_under_resumable_failures_dual_failure_wave|stability|yes|FIFO|1502.64|2524.00|1.00|0.00|0.00|16.90|0.63|1.00|8.50|yes|
-|replanning_stability_under_resumable_failures_dual_failure_wave|stability|yes|SJF|1581.90|3013.00|1.00|0.00|0.00|16.70|0.68|1.00|7.40|yes|
-|replanning_stability_under_resumable_failures_dual_failure_wave|stability|yes|PriorityOnly|1388.97|2402.00|1.00|0.00|0.00|16.90|0.63|1.00|8.50|yes|
-|replanning_stability_under_resumable_failures_cascading_failure_wave|stability|yes|EDF|1493.58|2331.00|1.00|0.00|0.00|15.40|0.64|1.00|9.80|yes|
-|replanning_stability_under_resumable_failures_cascading_failure_wave|stability|yes|FIFO|1495.48|2572.00|1.00|0.00|0.00|15.40|0.64|1.00|9.80|yes|
-|replanning_stability_under_resumable_failures_cascading_failure_wave|stability|yes|SJF|1500.47|2808.00|1.00|0.00|0.00|13.30|0.77|1.00|8.30|yes|
-|replanning_stability_under_resumable_failures_cascading_failure_wave|stability|yes|PriorityOnly|1452.89|2466.00|1.00|0.00|0.00|15.40|0.64|1.00|9.80|yes|
-|dependency_flow_stability_under_multiphase_disruption_temporary_capacity_loss|stability|yes|EDF|941.08|1467.00|1.00|0.00|0.00|19.60|0.54|1.00|7.00|yes|
-|dependency_flow_stability_under_multiphase_disruption_temporary_capacity_loss|stability|yes|FIFO|896.60|1326.00|1.00|0.00|0.00|19.60|0.54|1.00|7.00|yes|
-|dependency_flow_stability_under_multiphase_disruption_temporary_capacity_loss|stability|yes|SJF|805.98|1235.00|1.00|0.00|0.00|19.60|0.54|0.97|7.00|yes|
-|dependency_flow_stability_under_multiphase_disruption_temporary_capacity_loss|stability|yes|PriorityOnly|812.21|1218.00|1.00|0.00|0.00|19.60|0.54|1.00|7.00|yes|
-|dependency_flow_stability_under_multiphase_disruption_cascading_multiphase_outage|stability|yes|EDF|809.12|1203.00|1.00|0.00|0.00|21.10|0.50|1.00|7.90|yes|
-|dependency_flow_stability_under_multiphase_disruption_cascading_multiphase_outage|stability|yes|FIFO|832.15|1209.00|1.00|0.00|0.00|21.10|0.50|1.00|7.90|yes|
-|dependency_flow_stability_under_multiphase_disruption_cascading_multiphase_outage|stability|yes|SJF|830.00|1228.00|1.00|0.00|0.00|21.60|0.49|1.00|7.90|yes|
-|dependency_flow_stability_under_multiphase_disruption_cascading_multiphase_outage|stability|yes|PriorityOnly|816.04|1232.00|1.00|0.00|0.00|21.10|0.50|1.00|7.90|yes|
-|capability_fragmentation_shift_gap_resilience_capability_fragmentation_shift_gap|stability|yes|EDF|1105.79|1680.00|1.00|0.00|0.00|12.20|0.44|1.00|3.20|yes|
-|capability_fragmentation_shift_gap_resilience_capability_fragmentation_shift_gap|stability|yes|FIFO|1064.29|1499.00|1.00|0.00|0.00|12.20|0.44|1.00|3.20|yes|
-|capability_fragmentation_shift_gap_resilience_capability_fragmentation_shift_gap|stability|yes|SJF|996.10|1538.00|1.00|0.00|0.00|12.20|0.44|1.00|3.20|yes|
-|capability_fragmentation_shift_gap_resilience_capability_fragmentation_shift_gap|stability|yes|PriorityOnly|990.90|1395.00|1.00|0.00|0.00|12.20|0.44|1.00|3.20|yes|
-|capability_fragmentation_shift_gap_resilience_severe_fragmentation_shift_gap|stability|yes|EDF|1081.00|1427.00|1.00|0.00|0.00|20.20|0.27|0.58|6.00|yes|
-|capability_fragmentation_shift_gap_resilience_severe_fragmentation_shift_gap|stability|yes|FIFO|1047.67|1354.00|1.00|0.00|0.00|20.20|0.27|0.58|6.00|yes|
-|capability_fragmentation_shift_gap_resilience_severe_fragmentation_shift_gap|stability|yes|SJF|1088.00|1384.00|1.00|0.00|0.00|24.20|0.22|0.78|6.00|yes|
-|capability_fragmentation_shift_gap_resilience_severe_fragmentation_shift_gap|stability|yes|PriorityOnly|1012.63|1303.00|1.00|0.00|0.00|20.20|0.27|0.58|6.00|yes|
+| Scenario | Goal | Chaotic | Strategy | Mean latency (ns) | P95 latency (ns) | Completion ratio | Deadline miss rate | Constraint violation rate | Mean tardiness | Mean makespan | Utilization | Preferred actor hit ratio | Mean travel distance | Mean execution cost | Assignment churn | Replans | OK |
+|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+|throughput_release_contention_responsiveness_balanced_release_waves|throughput|no|EDF|9764.76|20597.00|1.00|0.00|0.00|0.00|15.30|0.85|0.00|0.00|0.00|0.42|6.90|yes|
+|throughput_release_contention_responsiveness_balanced_release_waves|throughput|no|FIFO|9082.84|18279.00|1.00|0.00|0.00|0.00|15.00|0.86|0.00|0.00|0.00|0.42|7.00|yes|
+|throughput_release_contention_responsiveness_balanced_release_waves|throughput|no|SJF|8582.75|18687.00|1.00|0.00|0.00|0.00|16.00|0.81|0.00|0.00|0.00|0.41|7.30|yes|
+|throughput_release_contention_responsiveness_balanced_release_waves|throughput|no|PriorityOnly|85507.78|17910.00|1.00|0.00|0.00|0.00|15.30|0.85|0.00|0.00|0.00|0.42|6.90|yes|
+|throughput_release_contention_responsiveness_chaotic_release_storm|throughput|yes|EDF|69939.28|39149.00|1.00|0.00|0.00|0.00|17.70|0.74|0.00|0.00|0.00|0.40|10.50|yes|
+|throughput_release_contention_responsiveness_chaotic_release_storm|throughput|yes|FIFO|15990.10|35972.00|1.00|0.00|0.00|0.00|17.80|0.74|0.00|0.00|0.00|0.45|10.30|yes|
+|throughput_release_contention_responsiveness_chaotic_release_storm|throughput|yes|SJF|104727.29|38167.00|1.00|0.00|0.00|0.00|18.90|0.69|0.00|0.00|0.00|0.47|10.30|yes|
+|throughput_release_contention_responsiveness_chaotic_release_storm|throughput|yes|PriorityOnly|69447.24|35218.00|1.00|0.00|0.00|0.00|17.90|0.73|0.00|0.00|0.00|0.43|10.30|yes|
+|deadline_resilience_with_actor_flapping_moderate_gap|deadlines|yes|EDF|5728.47|11868.00|1.00|0.00|0.00|0.00|19.20|0.77|0.00|0.00|0.00|0.54|6.80|yes|
+|deadline_resilience_with_actor_flapping_moderate_gap|deadlines|yes|FIFO|44904.56|11779.00|1.00|0.00|0.00|0.00|19.20|0.77|0.00|0.00|0.00|0.54|6.80|yes|
+|deadline_resilience_with_actor_flapping_moderate_gap|deadlines|yes|SJF|14502.96|13103.00|0.97|0.00|0.00|0.00|19.80|0.71|0.00|0.00|0.00|0.51|7.00|yes|
+|deadline_resilience_with_actor_flapping_moderate_gap|deadlines|yes|PriorityOnly|6172.21|11202.00|1.00|0.00|0.00|0.00|19.20|0.77|0.00|0.00|0.00|0.54|6.80|yes|
+|deadline_resilience_with_actor_flapping_severe_flapping_gap|deadlines|yes|EDF|37773.02|18150.00|1.00|0.00|0.00|0.00|27.30|0.74|0.00|0.00|0.00|0.50|8.80|yes|
+|deadline_resilience_with_actor_flapping_severe_flapping_gap|deadlines|yes|FIFO|8688.60|17117.00|1.00|0.00|0.00|0.00|27.30|0.74|0.00|0.00|0.00|0.50|8.80|yes|
+|deadline_resilience_with_actor_flapping_severe_flapping_gap|deadlines|yes|SJF|46705.20|18916.00|0.86|0.00|0.00|0.00|24.30|0.68|0.00|0.00|0.00|0.59|7.10|yes|
+|deadline_resilience_with_actor_flapping_severe_flapping_gap|deadlines|yes|PriorityOnly|7700.40|15616.00|1.00|0.00|0.00|0.00|27.30|0.74|0.00|0.00|0.00|0.50|8.80|yes|
+|replanning_stability_under_resumable_failures_dual_failure_wave|stability|yes|EDF|6173.06|13069.00|1.00|0.00|0.00|0.00|17.60|0.70|0.72|0.00|0.00|0.66|8.00|yes|
+|replanning_stability_under_resumable_failures_dual_failure_wave|stability|yes|FIFO|6153.88|12960.00|1.00|0.00|0.00|0.00|17.60|0.70|0.72|0.00|0.00|0.66|8.00|yes|
+|replanning_stability_under_resumable_failures_dual_failure_wave|stability|yes|SJF|41724.00|15129.00|1.00|0.00|0.00|0.00|19.30|0.72|0.54|0.00|0.00|0.65|7.70|yes|
+|replanning_stability_under_resumable_failures_dual_failure_wave|stability|yes|PriorityOnly|6680.73|13978.00|1.00|0.00|0.00|0.00|17.60|0.70|0.72|0.00|0.00|0.66|8.00|yes|
+|replanning_stability_under_resumable_failures_cascading_failure_wave|stability|yes|EDF|6360.03|13288.00|1.00|0.00|0.00|0.00|18.30|0.63|1.00|0.00|0.00|0.74|10.10|yes|
+|replanning_stability_under_resumable_failures_cascading_failure_wave|stability|yes|FIFO|7305.60|14909.00|1.00|0.00|0.00|0.00|18.30|0.63|1.00|0.00|0.00|0.74|10.10|yes|
+|replanning_stability_under_resumable_failures_cascading_failure_wave|stability|yes|SJF|6644.93|15171.00|1.00|0.00|0.00|0.00|17.50|0.67|0.77|0.00|0.00|0.74|9.10|yes|
+|replanning_stability_under_resumable_failures_cascading_failure_wave|stability|yes|PriorityOnly|6347.78|13245.00|1.00|0.00|0.00|0.00|18.30|0.63|1.00|0.00|0.00|0.74|10.10|yes|
+|dependency_flow_stability_under_multiphase_disruption_temporary_capacity_loss|stability|yes|EDF|3120.35|5760.00|1.00|0.00|0.00|0.00|19.50|0.54|0.00|0.00|0.00|0.70|7.00|yes|
+|dependency_flow_stability_under_multiphase_disruption_temporary_capacity_loss|stability|yes|FIFO|2434.19|4410.00|1.00|0.00|0.00|0.00|19.50|0.54|0.00|0.00|0.00|0.70|7.00|yes|
+|dependency_flow_stability_under_multiphase_disruption_temporary_capacity_loss|stability|yes|SJF|2795.55|4791.00|1.00|0.00|0.00|0.00|19.50|0.54|0.00|0.00|0.00|0.70|7.00|yes|
+|dependency_flow_stability_under_multiphase_disruption_temporary_capacity_loss|stability|yes|PriorityOnly|2554.85|4586.00|1.00|0.00|0.00|0.00|19.50|0.54|0.00|0.00|0.00|0.70|7.00|yes|
+|dependency_flow_stability_under_multiphase_disruption_cascading_multiphase_outage|stability|yes|EDF|2437.87|4477.00|1.00|0.00|0.00|0.00|20.90|0.50|0.00|0.00|0.00|1.00|7.90|yes|
+|dependency_flow_stability_under_multiphase_disruption_cascading_multiphase_outage|stability|yes|FIFO|2348.70|4120.00|1.00|0.00|0.00|0.00|20.90|0.50|0.00|0.00|0.00|1.00|7.90|yes|
+|dependency_flow_stability_under_multiphase_disruption_cascading_multiphase_outage|stability|yes|SJF|2460.27|4558.00|1.00|0.00|0.00|0.00|21.40|0.49|0.00|0.00|0.00|1.00|7.90|yes|
+|dependency_flow_stability_under_multiphase_disruption_cascading_multiphase_outage|stability|yes|PriorityOnly|2863.64|4932.00|1.00|0.00|0.00|0.00|20.90|0.50|0.00|0.00|0.00|1.00|7.90|yes|
+|capability_fragmentation_shift_gap_resilience_capability_fragmentation_shift_gap|stability|yes|EDF|3497.78|5768.00|1.00|0.00|0.00|0.00|12.10|0.27|0.50|2.50|3.90|0.83|3.10|yes|
+|capability_fragmentation_shift_gap_resilience_capability_fragmentation_shift_gap|stability|yes|FIFO|3436.54|5967.00|1.00|0.00|0.00|0.00|12.10|0.27|0.50|2.50|3.90|0.83|3.10|yes|
+|capability_fragmentation_shift_gap_resilience_capability_fragmentation_shift_gap|stability|yes|SJF|3658.68|6285.00|1.00|0.00|0.00|0.00|12.10|0.27|0.50|2.50|3.90|0.83|3.10|yes|
+|capability_fragmentation_shift_gap_resilience_capability_fragmentation_shift_gap|stability|yes|PriorityOnly|3183.90|5241.00|1.00|0.00|0.00|0.00|12.10|0.27|0.50|2.50|3.90|0.83|3.10|yes|
+|capability_fragmentation_shift_gap_resilience_severe_fragmentation_shift_gap|stability|yes|EDF|2868.33|4619.00|1.00|0.00|0.00|0.00|20.10|0.21|0.75|2.00|4.54|0.58|6.00|yes|
+|capability_fragmentation_shift_gap_resilience_severe_fragmentation_shift_gap|stability|yes|FIFO|2795.71|4491.00|1.00|0.00|0.00|0.00|20.10|0.21|0.75|2.00|4.54|0.58|6.00|yes|
+|capability_fragmentation_shift_gap_resilience_severe_fragmentation_shift_gap|stability|yes|SJF|47150.70|6084.00|1.00|0.00|0.00|0.00|24.60|0.17|0.53|2.67|4.99|0.66|6.00|yes|
+|capability_fragmentation_shift_gap_resilience_severe_fragmentation_shift_gap|stability|yes|PriorityOnly|3306.81|5238.00|1.00|0.00|0.00|0.00|20.10|0.21|0.75|2.00|4.54|0.58|6.00|yes|
 
 ## Strategy recommendations
 
 - `throughput_release_contention_responsiveness_balanced_release_waves`: **FIFO** best matched the `throughput` criterion in this run. Verifies how quickly each strategy reacts to rolling releases while preserving throughput and makespan quality under contention.
-- `throughput_release_contention_responsiveness_chaotic_release_storm`: **FIFO** best matched the `throughput` criterion in this run. Verifies how quickly each strategy reacts to rolling releases while preserving throughput and makespan quality under contention.
+- `throughput_release_contention_responsiveness_chaotic_release_storm`: **EDF** best matched the `throughput` criterion in this run. Verifies how quickly each strategy reacts to rolling releases while preserving throughput and makespan quality under contention.
 - `deadline_resilience_with_actor_flapping_moderate_gap`: **EDF** best matched the `deadlines` criterion in this run. Verifies deadline protection when capacity flaps during a deadline-heavy burst.
 - `deadline_resilience_with_actor_flapping_severe_flapping_gap`: **EDF** best matched the `deadlines` criterion in this run. Verifies deadline protection when capacity flaps during a deadline-heavy burst.
 - `replanning_stability_under_resumable_failures_dual_failure_wave`: **SJF** best matched the `stability` criterion in this run. Verifies replanning stability and churn when assigned work repeatedly fails and re-enters the ready queue.
 - `replanning_stability_under_resumable_failures_cascading_failure_wave`: **SJF** best matched the `stability` criterion in this run. Verifies replanning stability and churn when assigned work repeatedly fails and re-enters the ready queue.
-- `dependency_flow_stability_under_multiphase_disruption_temporary_capacity_loss`: **SJF** best matched the `stability` criterion in this run. Verifies whether strategy choices remain stable when dependency-gated work and temporary capacity loss interact across phases.
+- `dependency_flow_stability_under_multiphase_disruption_temporary_capacity_loss`: **EDF** best matched the `stability` criterion in this run. Verifies whether strategy choices remain stable when dependency-gated work and temporary capacity loss interact across phases.
 - `dependency_flow_stability_under_multiphase_disruption_cascading_multiphase_outage`: **EDF** best matched the `stability` criterion in this run. Verifies whether strategy choices remain stable when dependency-gated work and temporary capacity loss interact across phases.
 - `capability_fragmentation_shift_gap_resilience_capability_fragmentation_shift_gap`: **EDF** best matched the `stability` criterion in this run. Verifies plan stability when capabilities are split across actors with staggered availability windows.
 - `capability_fragmentation_shift_gap_resilience_severe_fragmentation_shift_gap`: **EDF** best matched the `stability` criterion in this run. Verifies plan stability when capabilities are split across actors with staggered availability windows.

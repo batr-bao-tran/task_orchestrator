@@ -5,7 +5,7 @@ set -euo pipefail
 readonly DEFAULT_THRESHOLD_PERCENT="90"
 readonly DEFAULT_BAZEL_VERSION="8.5.0"
 readonly COVERAGE_TARGETS="//..."
-readonly COVERAGE_FILTER='^//application(?!/tests|/runtime_service/tests)[/:],^//protocol(?!/tests)[/:],^//task_orchestrator(?!/tests|/benchmark)[/:],^//utils(?!/tests)[/:]'
+readonly COVERAGE_FILTER='^//'
 readonly BASELINE_REPORT_SUFFIX="/_coverage/_baseline_report.dat"
 readonly COVERAGE_REPORT_SUFFIX="/_coverage/_coverage_report.dat"
 

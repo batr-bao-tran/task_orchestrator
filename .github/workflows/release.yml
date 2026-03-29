@@ -7,6 +7,10 @@ on:
     types: [published]
   workflow_dispatch:
 
+env:
+  BAZEL_VERSION: "8.5.0"
+  BAZEL_CACHE_VERSION: "v1"
+
 jobs:
   package:
     strategy:
@@ -31,25 +35,61 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      - name: Compute Bazel cache settings
+        id: bazel-cache
+        run: |
+          {
+            echo "disk_cache_dir=${RUNNER_TEMP}/bazel-disk-cache/${{ matrix.os }}"
+            echo "disk_cache_key=bazel-disk-${{ env.BAZEL_CACHE_VERSION }}-${{ matrix.os }}-default-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}"
+            echo "disk_restore_key=bazel-disk-${{ env.BAZEL_CACHE_VERSION }}-${{ matrix.os }}-default-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-"
+            echo "repository_cache_dir=${RUNNER_TEMP}/bazel-repository-cache/${{ matrix.os }}"
+            echo "repository_cache_key=bazel-repository-${{ env.BAZEL_CACHE_VERSION }}-${{ matrix.os }}-${{ hashFiles('.bazelversion', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}"
+            echo "repository_restore_key=bazel-repository-${{ env.BAZEL_CACHE_VERSION }}-${{ matrix.os }}-${{ hashFiles('.bazelversion', 'MODULE.bazel', 'MODULE.bazel.lock') }}-"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
         with:
-          bazel_version: "8.5.0"
+          bazel_version: ${{ env.BAZEL_VERSION }}
+
+      - name: Restore Bazel disk cache
+        id: restore-disk-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.disk_cache_key }}
+          restore-keys: |
+            ${{ steps.bazel-cache.outputs.disk_restore_key }}
+
+      - name: Restore Bazel repository cache
+        id: restore-repository-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.repository_cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.repository_cache_key }}
+          restore-keys: |
+            ${{ steps.bazel-cache.outputs.repository_restore_key }}
 
       - name: Build
+        env:
+          BAZEL_CI_DISK_CACHE_DIR: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          BAZEL_CI_REPOSITORY_CACHE_DIR: ${{ steps.bazel-cache.outputs.repository_cache_dir }}
         run: |
           if [ "${{ matrix.os }}" = "ubuntu-24.04" ]; then
-            bazel build --config=linux //task_orchestrator:task_orchestrator
+            tools/ci/bazel_ci.sh build --config=linux //task_orchestrator:task_orchestrator
           else
-            bazel build --config=darwin //task_orchestrator:task_orchestrator
+            tools/ci/bazel_ci.sh build --config=darwin //task_orchestrator:task_orchestrator
           fi
 
       - name: Test
+        env:
+          BAZEL_CI_DISK_CACHE_DIR: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          BAZEL_CI_REPOSITORY_CACHE_DIR: ${{ steps.bazel-cache.outputs.repository_cache_dir }}
         run: |
           if [ "${{ matrix.os }}" = "ubuntu-24.04" ]; then
-            bazel test --config=linux //... --test_output=errors
+            tools/ci/bazel_ci.sh test --config=linux //... --test_output=errors
           else
-            bazel test --config=darwin //... --test_output=errors
+            tools/ci/bazel_ci.sh test --config=darwin //... --test_output=errors
           fi
 
       - name: Prepare package
@@ -67,6 +107,20 @@ jobs:
           tar czf "${PKGDIR}.tar.gz" "$PKGDIR"
           echo "package=${PKGDIR}.tar.gz" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Save Bazel disk cache
+        if: steps.restore-disk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.disk_cache_key }}
+
+      - name: Save Bazel repository cache
+        if: steps.restore-repository-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.repository_cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.repository_cache_key }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

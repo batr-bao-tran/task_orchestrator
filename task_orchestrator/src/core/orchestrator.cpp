@@ -1,7 +1,6 @@
 #include "task_orchestrator/core/orchestrator.hpp"
 
 #include <algorithm>
-#include <unordered_set>
 
 #include "task_orchestrator/core/planner_fsm.hpp"
 #include "task_orchestrator/data/phase.hpp"
@@ -12,7 +11,6 @@ namespace task_orchestrator {
 struct Orchestrator::Impl {
   Workflow workflow_;
   ActorRegistry registry_;
-  Scheduler scheduler_;
   std::unique_ptr<SchedulingStrategy> strategy_;
   ActorRankingProfile actor_ranking_profile_;
   PlannerStateMachine fsm_;
@@ -44,22 +42,51 @@ struct Orchestrator::Impl {
     values.erase(first, last);
   }
 
+  static bool task_is_blocked_for_dispatch(const WorkflowState& state, const TaskId& task_id) {
+    return contains(state.unresumable_tasks, task_id);
+  }
+
   Duration task_duration(const TaskId& task_id) const {
     const Process* proc = workflow_.process_for_task(task_id);
     return proc ? proc->estimated_duration : 1;
   }
 
-  void apply_dispatch() {
+  int task_demand(const TaskId& task_id) const {
+    const Process* proc = workflow_.process_for_task(task_id);
+    return proc ? proc->demand : 1;
+  }
+
+  bool task_dependencies_completed(const TaskId& task_id) const {
+    const Process* proc = workflow_.process_for_task(task_id);
+    return proc == nullptr || std::ranges::all_of(proc->dependency_task_ids, [this](const TaskId& dependency_id) {
+             return contains(workflow_state_.completed_tasks, dependency_id);
+           });
+  }
+
+  void apply_dispatch(Time now) {
     for (const Assignment& assignment : latest_schedule_.assignments) {
-      if (!contains(workflow_state_.assigned_tasks, assignment.task_id)) {
-        workflow_state_.assigned_tasks.push_back(assignment.task_id);
+      if (assignment.start_time > now) {
+        continue;
       }
+      if (!task_dependencies_completed(assignment.task_id)) {
+        continue;
+      }
+      if (contains(workflow_state_.completed_tasks, assignment.task_id)) {
+        continue;
+      }
+      if (contains(workflow_state_.assigned_tasks, assignment.task_id)) {
+        continue;
+      }
+      if (task_is_blocked_for_dispatch(workflow_state_, assignment.task_id)) {
+        continue;
+      }
+      workflow_state_.assigned_tasks.push_back(assignment.task_id);
       erase_value(workflow_state_.resumable_tasks, assignment.task_id);
       erase_value(workflow_state_.unresumable_tasks, assignment.task_id);
       workflow_state_.task_actor[assignment.task_id] = assignment.actor_id;
       Actor* actor = registry_.get_mutable(assignment.actor_id);
       if (actor) {
-        actor->current_load++;
+        actor->current_load += task_demand(assignment.task_id);
       }
       workflow_state_.actor_load[assignment.actor_id] =
           registry_.get(assignment.actor_id) ? registry_.get(assignment.actor_id)->current_load : 0U;
@@ -67,7 +94,9 @@ struct Orchestrator::Impl {
       workflow_state_.task_planned_end_time[assignment.task_id] =
           assignment.start_time + task_duration(assignment.task_id);
     }
-    fsm_.process_event(DispatchComplete{});
+    if (fsm_.current_state() == PlannerState::Dispatching) {
+      fsm_.process_event(DispatchComplete{});
+    }
   }
 };
 
@@ -115,12 +144,15 @@ void Orchestrator::tick(Time now) {
   }
   if (s == PlannerState::Idle) {
     impl_->fsm_.process_event(StartPlanning{});
+    impl_->replan_requested_ = false;
     impl_->run_planning(now);
   } else if (s == PlannerState::Planning) {
+    impl_->replan_requested_ = false;
     impl_->run_planning(now);
   } else if (s == PlannerState::Dispatching) {
-    impl_->apply_dispatch();
+    impl_->apply_dispatch(now);
   } else if (s == PlannerState::Running) {
+    impl_->apply_dispatch(now);
     impl_->fsm_.process_event(Tick{});
   }
 }
@@ -144,10 +176,12 @@ void Orchestrator::notify_task_failed(const TaskId& task_id, bool resumable) {
   Impl::erase_value(state.assigned_tasks, task_id);
   Impl::erase_value(state.completed_tasks, task_id);
   const auto owner_it = state.task_actor.find(task_id);
+  const Process* process = impl_->workflow_.process_for_task(task_id);
+  const int demand = process ? process->demand : 1;
   if (owner_it != state.task_actor.end()) {
     Actor* owner = impl_->registry_.get_mutable(owner_it->second);
     if (owner && owner->current_load > 0) {
-      owner->current_load--;
+      owner->current_load = std::max(0, owner->current_load - demand);
       state.actor_load[owner->id] = owner->current_load;
     }
     state.task_actor.erase(owner_it);
@@ -171,10 +205,12 @@ void Orchestrator::notify_task_completed(const TaskId& task_id, Time actual_comp
   }
 
   const auto owner_it = state.task_actor.find(task_id);
+  const Process* process = impl_->workflow_.process_for_task(task_id);
+  const int demand = process ? process->demand : 1;
   if (owner_it != state.task_actor.end()) {
     Actor* owner = impl_->registry_.get_mutable(owner_it->second);
     if (owner && owner->current_load > 0) {
-      owner->current_load--;
+      owner->current_load = std::max(0, owner->current_load - demand);
       state.actor_load[owner->id] = owner->current_load;
     }
     state.task_actor.erase(owner_it);

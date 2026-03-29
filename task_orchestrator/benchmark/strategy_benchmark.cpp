@@ -103,10 +103,16 @@ struct DynamicRunMetrics {
   size_t total_tasks = 0;
   size_t completed_tasks = 0;
   size_t deadline_misses = 0;
+  size_t dispatched_assignments = 0;
+  size_t constraint_violations = 0;
   size_t planning_rounds = 0;
   size_t replan_rounds = 0;
+  size_t preferred_actor_hits = 0;
+  size_t preferred_actor_opportunities = 0;
   double utilization_ratio = 0.0;
   double mean_assignment_churn = 0.0;
+  double total_travel_distance = 0.0;
+  double total_execution_cost = 0.0;
   int64_t total_tardiness = 0;
   to::Time makespan = 0;
   std::vector<int64_t> planning_latencies_ns;
@@ -123,11 +129,15 @@ struct StrategyReportRow {
   double p95_latency_ns = 0.0;
   double completion_ratio = 0.0;
   double deadline_miss_rate = 0.0;
+  double constraint_violation_rate = 0.0;
   double mean_tardiness = 0.0;
   double mean_makespan = 0.0;
   double mean_utilization = 0.0;
   double mean_assignment_churn = 0.0;
   double mean_replans = 0.0;
+  double preferred_actor_hit_ratio = 0.0;
+  double mean_travel_distance = 0.0;
+  double mean_execution_cost = 0.0;
 };
 
 struct BenchmarkArtifacts {
@@ -184,9 +194,163 @@ to::Duration task_duration(const to::Workflow& workflow, const to::TaskId& task_
   return process ? process->estimated_duration : 1;
 }
 
+int task_demand(const to::Workflow& workflow, const to::TaskId& task_id) {
+  const to::Process* process = workflow.process_for_task(task_id);
+  return process ? process->demand : 1;
+}
+
 std::optional<to::Time> task_deadline(const to::Workflow& workflow, const to::TaskId& task_id) {
   const to::Process* process = workflow.process_for_task(task_id);
   return process ? process->deadline : std::nullopt;
+}
+
+to::Time task_release_time(const to::Workflow& workflow, const to::WorkflowState& state, const to::TaskId& task_id) {
+  if (const auto release_it = state.task_release_time.find(task_id); release_it != state.task_release_time.end()) {
+    return release_it->second;
+  }
+  const to::Process* process = workflow.process_for_task(task_id);
+  return process ? process->release_time : 0;
+}
+
+std::optional<to::Time> task_latest_start_time(const to::Workflow& workflow, const to::TaskId& task_id) {
+  const to::Process* process = workflow.process_for_task(task_id);
+  return process ? process->latest_start_time : std::nullopt;
+}
+
+to::Time fallback_distance_for_task(const to::Process* process) {
+  if (process == nullptr || process->actor_distances.empty()) {
+    return 0;
+  }
+  const auto farthest =
+      std::ranges::max_element(process->actor_distances, {}, [](const auto& entry) { return entry.second; });
+  return farthest == process->actor_distances.end() ? 0 : farthest->second + 1;
+}
+
+to::Time task_distance(const to::Workflow& workflow,
+                       const to::WorkflowState& state,
+                       const to::TaskId& task_id,
+                       const to::ActorId& actor_id) {
+  if (const auto override_it = state.task_actor_distance.find(task_id);
+      override_it != state.task_actor_distance.end()) {
+    if (const auto actor_it = override_it->second.find(actor_id); actor_it != override_it->second.end()) {
+      return actor_it->second;
+    }
+    if (!override_it->second.empty()) {
+      const auto farthest =
+          std::ranges::max_element(override_it->second, {}, [](const auto& entry) { return entry.second; });
+      return farthest == override_it->second.end() ? 0 : farthest->second + 1;
+    }
+  }
+  const to::Process* process = workflow.process_for_task(task_id);
+  if (process == nullptr) {
+    return 0;
+  }
+  if (const auto actor_it = process->actor_distances.find(actor_id); actor_it != process->actor_distances.end()) {
+    return actor_it->second;
+  }
+  return fallback_distance_for_task(process);
+}
+
+bool actor_matches_task_constraints(const to::Process& process,
+                                    const to::WorkflowState& state,
+                                    const to::TaskId& task_id,
+                                    const to::Actor& actor) {
+  if (const auto allowed_it = state.task_allowed_actors.find(task_id);
+      allowed_it != state.task_allowed_actors.end() && !allowed_it->second.empty() &&
+      std::ranges::find(allowed_it->second, actor.id) == allowed_it->second.end()) {
+    return false;
+  }
+  if (!process.allowed_actor_ids.empty() &&
+      std::ranges::find(process.allowed_actor_ids, actor.id) == process.allowed_actor_ids.end()) {
+    return false;
+  }
+  if (!process.allowed_actor_types.empty() &&
+      std::ranges::find(process.allowed_actor_types, actor.type) == process.allowed_actor_types.end()) {
+    return false;
+  }
+  return std::ranges::all_of(process.required_capabilities, [&actor](const std::string& capability) {
+    return std::ranges::find(actor.capabilities, capability) != actor.capabilities.end();
+  });
+}
+
+bool preferred_actor_hit(const to::Workflow& workflow,
+                         const to::WorkflowState& state,
+                         const to::TaskId& task_id,
+                         const to::ActorId& actor_id) {
+  if (const auto preferred_it = state.task_preferred_actors.find(task_id);
+      preferred_it != state.task_preferred_actors.end()) {
+    return std::ranges::find(preferred_it->second, actor_id) != preferred_it->second.end();
+  }
+  const to::Process* process = workflow.process_for_task(task_id);
+  return process != nullptr &&
+         std::ranges::find(process->preferred_actor_ids, actor_id) != process->preferred_actor_ids.end();
+}
+
+bool has_preferred_actor_targets(const to::Workflow& workflow,
+                                 const to::WorkflowState& state,
+                                 const to::TaskId& task_id) {
+  if (const auto preferred_it = state.task_preferred_actors.find(task_id);
+      preferred_it != state.task_preferred_actors.end()) {
+    return !preferred_it->second.empty();
+  }
+  const to::Process* process = workflow.process_for_task(task_id);
+  return process != nullptr && !process->preferred_actor_ids.empty();
+}
+
+bool dependencies_completed_for_dispatch(const to::Process& process,
+                                         const to::WorkflowState& state,
+                                         const to::Time assignment_start_time) {
+  return std::ranges::all_of(process.dependency_task_ids, [&](const to::TaskId& dependency_id) {
+    if (!contains(state.completed_tasks, dependency_id)) {
+      return false;
+    }
+    const auto completion_it = state.task_actual_completion_time.find(dependency_id);
+    return completion_it != state.task_actual_completion_time.end() && completion_it->second <= assignment_start_time;
+  });
+}
+
+bool mutex_clear_for_dispatch(const to::Process& process, const to::WorkflowState& state) {
+  return std::ranges::none_of(process.mutually_exclusive_task_ids, [&](const to::TaskId& task_id) {
+    return contains(state.completed_tasks, task_id) || contains(state.assigned_tasks, task_id);
+  });
+}
+
+bool assignment_is_constraint_compliant(const to::Workflow& workflow,
+                                        const to::ActorRegistry& registry,
+                                        const to::WorkflowState& state,
+                                        const to::Assignment& assignment) {
+  const to::Process* process = workflow.process_for_task(assignment.task_id);
+  const to::Actor* actor = registry.get(assignment.actor_id);
+  if (process == nullptr || actor == nullptr) {
+    return false;
+  }
+  if (!actor_matches_task_constraints(*process, state, assignment.task_id, *actor)) {
+    return false;
+  }
+  if (task_release_time(workflow, state, assignment.task_id) > assignment.start_time) {
+    return false;
+  }
+  if (const std::optional<to::Time> latest_start = task_latest_start_time(workflow, assignment.task_id);
+      latest_start && assignment.start_time > *latest_start) {
+    return false;
+  }
+  if (const std::optional<to::Time> deadline = task_deadline(workflow, assignment.task_id);
+      deadline && assignment.start_time + task_duration(workflow, assignment.task_id) > *deadline) {
+    return false;
+  }
+  if (!dependencies_completed_for_dispatch(*process, state, assignment.start_time)) {
+    return false;
+  }
+  if (!mutex_clear_for_dispatch(*process, state)) {
+    return false;
+  }
+  int current_load = 0;
+  if (state.actor_load.contains(assignment.actor_id)) {
+    current_load = state.actor_load.at(assignment.actor_id);
+  } else if (actor != nullptr) {
+    current_load = actor->current_load;
+  }
+  return current_load + task_demand(workflow, assignment.task_id) <= actor->capacity;
 }
 
 void update_phase_completion(const to::Workflow& workflow, to::WorkflowState& state) {
@@ -279,7 +443,7 @@ void mark_task_completed(const to::Workflow& workflow,
   erase_value(state.resumable_tasks, task_id);
   erase_value(state.unresumable_tasks, task_id);
   if (to::Actor* actor = registry.get_mutable(actor_id); actor != nullptr && actor->current_load > 0) {
-    --actor->current_load;
+    actor->current_load = std::max(0, actor->current_load - task_demand(workflow, task_id));
     state.actor_load[actor_id] = actor->current_load;
   }
   state.task_actor.erase(task_id);
@@ -288,13 +452,14 @@ void mark_task_completed(const to::Workflow& workflow,
 }
 
 void mark_task_failed(to::ActorRegistry& registry,
+                      const to::Workflow& workflow,
                       to::WorkflowState& state,
                       const to::TaskId& task_id,
                       const to::ActorId& actor_id) {
   erase_value(state.assigned_tasks, task_id);
   erase_value(state.completed_tasks, task_id);
   if (to::Actor* actor = registry.get_mutable(actor_id); actor != nullptr && actor->current_load > 0) {
-    --actor->current_load;
+    actor->current_load = std::max(0, actor->current_load - task_demand(workflow, task_id));
     state.actor_load[actor_id] = actor->current_load;
   }
   state.task_actor.erase(task_id);
@@ -304,7 +469,7 @@ void mark_task_failed(to::ActorRegistry& registry,
 }
 
 void apply_event(const ScenarioEvent& event,
-                 const to::Workflow& /*workflow*/,
+                 const to::Workflow& workflow,
                  to::ActorRegistry& registry,
                  to::WorkflowState& state) {
   switch (event.kind) {
@@ -315,7 +480,7 @@ void apply_event(const ScenarioEvent& event,
       erase_value(state.unavailable_actors, event.actor_id);
       break;
     case EventKind::TaskFailResumable:
-      mark_task_failed(registry, state, event.task_id, event.actor_id);
+      mark_task_failed(registry, workflow, state, event.task_id, event.actor_id);
       break;
   }
 }
@@ -398,6 +563,22 @@ DynamicRunMetrics run_dynamic_strategy_scenario(const DynamicScenarioInput& scen
         assignment_it = planned_assignments.erase(assignment_it);
         continue;
       }
+      ++metrics.dispatched_assignments;
+      if (!assignment_is_constraint_compliant(scenario.workflow, registry, state, assignment)) {
+        ++metrics.constraint_violations;
+      }
+      if (has_preferred_actor_targets(scenario.workflow, state, assignment.task_id)) {
+        ++metrics.preferred_actor_opportunities;
+        if (preferred_actor_hit(scenario.workflow, state, assignment.task_id, assignment.actor_id)) {
+          ++metrics.preferred_actor_hits;
+        }
+      }
+      metrics.total_travel_distance +=
+          static_cast<double>(task_distance(scenario.workflow, state, assignment.task_id, assignment.actor_id));
+      if (const to::Actor* actor = registry.get(assignment.actor_id); actor != nullptr) {
+        metrics.total_execution_cost +=
+            actor->execution_cost_per_unit * static_cast<double>(task_duration(scenario.workflow, assignment.task_id));
+      }
       insert_unique(state.assigned_tasks, assignment.task_id);
       erase_value(state.resumable_tasks, assignment.task_id);
       state.task_actor[assignment.task_id] = assignment.actor_id;
@@ -405,7 +586,7 @@ DynamicRunMetrics run_dynamic_strategy_scenario(const DynamicScenarioInput& scen
       state.task_planned_end_time[assignment.task_id] =
           assignment.start_time + task_duration(scenario.workflow, assignment.task_id);
       if (to::Actor* actor = registry.get_mutable(assignment.actor_id); actor != nullptr) {
-        ++actor->current_load;
+        actor->current_load += task_demand(scenario.workflow, assignment.task_id);
         state.actor_load[assignment.actor_id] = actor->current_load;
       }
       completion_events.push_back(CompletionEvent{.time = state.task_planned_end_time[assignment.task_id],
@@ -497,6 +678,14 @@ to::ActorRegistry make_registry(const std::vector<std::tuple<to::ActorId, int, t
         .availability_windows = {to::AvailabilityWindow{.start = start, .end = end}},
         .current_load = 0,
     });
+  }
+  return registry;
+}
+
+to::ActorRegistry make_registry(const std::vector<to::Actor>& actors) {
+  to::ActorRegistry registry;
+  for (const to::Actor& actor : actors) {
+    registry.add(actor);
   }
   return registry;
 }
@@ -833,28 +1022,48 @@ std::vector<DynamicScenarioDefinition> dynamic_scenarios() {
                    .sub_process_ids = {},
                    .estimated_duration = 3,
                    .priority = 10,
-                   .deadline = 18},
+                   .deadline = 18,
+                   .allowed_actor_types = {"robot"},
+                   .preferred_actor_ids = {"A1"},
+                   .required_capabilities = {"scan"},
+                   .actor_distances = {{"A1", 1}, {"A2", 3}, {"A3", 8}}},
                   {.id = "scan_b",
                    .phase_id = "scan",
                    .sub_process_ids = {},
                    .estimated_duration = 4,
                    .priority = 9,
-                   .deadline = 20},
+                   .deadline = 20,
+                   .allowed_actor_types = {"robot"},
+                   .preferred_actor_ids = {"A2"},
+                   .required_capabilities = {"scan"},
+                   .actor_distances = {{"A1", 4}, {"A2", 1}, {"A3", 7}}},
                   {.id = "lift_a",
                    .phase_id = "lift",
                    .sub_process_ids = {},
                    .estimated_duration = 5,
                    .priority = 8,
-                   .deadline = 30},
+                   .deadline = 30,
+                   .demand = variant.severe ? 2 : 1,
+                   .allowed_actor_ids = {"A2", "A3"},
+                   .preferred_actor_ids = {"A2"},
+                   .required_capabilities = {"lift"},
+                   .actor_distances = {{"A2", 2}, {"A3", 5}}},
                   {.id = "lift_b",
                    .phase_id = "lift",
                    .sub_process_ids = {},
                    .estimated_duration = 4 + static_cast<to::Duration>(rng() % 2),
                    .priority = 7,
-                   .deadline = 34},
+                   .deadline = 34,
+                   .allowed_actor_ids = {"A2", "A3"},
+                   .preferred_actor_ids = {"A3"},
+                   .required_capabilities = {"lift"},
+                   .actor_distances = {{"A2", 4}, {"A3", 1}}},
               };
               to::WorkflowState state;
               state.task_release_time["lift_b"] = variant.severe ? 12 : 8;
+              state.task_actor_distance["lift_b"] =
+                  variant.severe ? std::unordered_map<to::ActorId, to::Time>{{"A2", 5}, {"A3", 1}}
+                                 : std::unordered_map<to::ActorId, to::Time>{{"A2", 3}, {"A3", 1}};
               return DynamicScenarioInput{
                   .workflow = make_workflow("capability_fragmentation_shift_gap_resilience_" + variant.suffix,
                                             {
@@ -870,14 +1079,52 @@ std::vector<DynamicScenarioDefinition> dynamic_scenarios() {
                                             processes),
                   .registry = make_registry(
                       variant.severe
-                          ? std::vector<std::tuple<to::ActorId, int, to::Time, to::Time>>{{"A1", 1, 0, 10},
-                                                                                          {"A2", 1, 8, 18},
-                                                                                          {"A3", 1, 16, 40}}
-                          : std::vector<std::tuple<to::ActorId, int, to::Time, to::Time>>{{"A1", 1, 0, 14},
-                                                                                          {"A2", 1, 6, 24},
-                                                                                          {"A3", 1, 16, 40}}),
+                          ? std::vector<to::Actor>{to::Actor{.id = "A1",
+                                                             .type = "robot",
+                                                             .capacity = 1,
+                                                             .availability_windows = {{.start = 0, .end = 10}},
+                                                             .capabilities = {"scan"},
+                                                             .execution_cost_per_unit = 0.8,
+                                                             .current_load = 0},
+                                                   to::Actor{.id = "A2",
+                                                             .type = "robot",
+                                                             .capacity = 2,
+                                                             .availability_windows = {{.start = 8, .end = 18}},
+                                                             .capabilities = {"scan", "lift"},
+                                                             .execution_cost_per_unit = 1.2,
+                                                             .current_load = 0},
+                                                   to::Actor{.id = "A3",
+                                                             .type = "robot",
+                                                             .capacity = 2,
+                                                             .availability_windows = {{.start = 16, .end = 40}},
+                                                             .capabilities = {"lift"},
+                                                             .execution_cost_per_unit = 1.6,
+                                                             .current_load = 0}}
+                          : std::vector<to::Actor>{to::Actor{.id = "A1",
+                                                             .type = "robot",
+                                                             .capacity = 1,
+                                                             .availability_windows = {{.start = 0, .end = 14}},
+                                                             .capabilities = {"scan"},
+                                                             .execution_cost_per_unit = 0.8,
+                                                             .current_load = 0},
+                                                   to::Actor{.id = "A2",
+                                                             .type = "robot",
+                                                             .capacity = 2,
+                                                             .availability_windows = {{.start = 6, .end = 24}},
+                                                             .capabilities = {"scan", "lift"},
+                                                             .execution_cost_per_unit = 1.1,
+                                                             .current_load = 0},
+                                                   to::Actor{.id = "A3",
+                                                             .type = "robot",
+                                                             .capacity = 2,
+                                                             .availability_windows = {{.start = 16, .end = 40}},
+                                                             .capabilities = {"lift"},
+                                                             .execution_cost_per_unit = 1.4,
+                                                             .current_load = 0}}),
                   .state = std::move(state),
                   .ranking_profile = {.criteria = {to::ActorRankingCriterion::EarliestFeasibleCompletion,
+                                                   to::ActorRankingCriterion::PreferredActor,
+                                                   to::ActorRankingCriterion::ExecutionCost,
                                                    to::ActorRankingCriterion::LeastLoaded}},
                   .events = variant.severe ? std::vector<ScenarioEvent>{{.time = 9,
                                                                          .kind = EventKind::ActorUnavailable,
@@ -952,6 +1199,13 @@ std::vector<StrategyReportRow> benchmark_strategies(const StrategyBenchmarkConfi
                                                              : static_cast<double>(metrics.deadline_misses) /
                                                                    static_cast<double>(metrics.total_tasks);
                                                 }),
+          .constraint_violation_rate = arithmetic_mean(
+              runs,
+              [](const DynamicRunMetrics& metrics) {
+                return metrics.dispatched_assignments == 0 ? 0.0
+                                                           : static_cast<double>(metrics.constraint_violations) /
+                                                                 static_cast<double>(metrics.dispatched_assignments);
+              }),
           .mean_tardiness = arithmetic_mean(
               runs, [](const DynamicRunMetrics& metrics) { return static_cast<double>(metrics.total_tardiness); }),
           .mean_makespan = arithmetic_mean(
@@ -962,6 +1216,28 @@ std::vector<StrategyReportRow> benchmark_strategies(const StrategyBenchmarkConfi
               arithmetic_mean(runs, [](const DynamicRunMetrics& metrics) { return metrics.mean_assignment_churn; }),
           .mean_replans = arithmetic_mean(
               runs, [](const DynamicRunMetrics& metrics) { return static_cast<double>(metrics.replan_rounds); }),
+          .preferred_actor_hit_ratio =
+              arithmetic_mean(runs,
+                              [](const DynamicRunMetrics& metrics) {
+                                return metrics.preferred_actor_opportunities == 0
+                                           ? 0.0
+                                           : static_cast<double>(metrics.preferred_actor_hits) /
+                                                 static_cast<double>(metrics.preferred_actor_opportunities);
+                              }),
+          .mean_travel_distance = arithmetic_mean(
+              runs,
+              [](const DynamicRunMetrics& metrics) {
+                return metrics.dispatched_assignments == 0
+                           ? 0.0
+                           : metrics.total_travel_distance / static_cast<double>(metrics.dispatched_assignments);
+              }),
+          .mean_execution_cost = arithmetic_mean(runs,
+                                                 [](const DynamicRunMetrics& metrics) {
+                                                   return metrics.dispatched_assignments == 0
+                                                              ? 0.0
+                                                              : metrics.total_execution_cost /
+                                                                    static_cast<double>(metrics.dispatched_assignments);
+                                                 }),
       });
     }
   }
@@ -973,13 +1249,25 @@ const StrategyReportRow* best_strategy_row(const std::vector<StrategyReportRow>&
   const auto score = [](const StrategyReportRow& row) {
     switch (row.goal) {
       case ScenarioGoal::Throughput:
-        return std::tuple(row.ok ? 1 : 0, row.completion_ratio, -row.mean_makespan, -row.mean_latency_ns);
+        return std::tuple(row.ok ? 1 : 0,
+                          -row.constraint_violation_rate,
+                          row.completion_ratio,
+                          -row.mean_makespan,
+                          -row.mean_latency_ns);
       case ScenarioGoal::Deadlines:
-        return std::tuple(row.ok ? 1 : 0, -row.deadline_miss_rate, -row.mean_tardiness, row.completion_ratio);
+        return std::tuple(row.ok ? 1 : 0,
+                          -row.constraint_violation_rate,
+                          -row.deadline_miss_rate,
+                          -row.mean_tardiness,
+                          row.completion_ratio);
       case ScenarioGoal::Stability:
-        return std::tuple(row.ok ? 1 : 0, -row.mean_assignment_churn, row.completion_ratio, -row.mean_replans);
+        return std::tuple(row.ok ? 1 : 0,
+                          -row.constraint_violation_rate,
+                          -row.mean_assignment_churn,
+                          row.completion_ratio,
+                          -row.mean_replans);
     }
-    return std::tuple(0, 0.0, 0.0, 0.0);
+    return std::tuple(0, 0.0, 0.0, 0.0, 0.0);
   };
 
   const StrategyReportRow* best_row = nullptr;
@@ -1007,20 +1295,28 @@ std::string render_markdown_report(const StrategyBenchmarkConfig& config,
   report << "- `mean_latency_ns` / `p95_latency_ns`: planning responsiveness and latency tail behavior.\n";
   report << "- `completion_ratio` and `mean_makespan`: throughput and runtime completion quality.\n";
   report << "- `deadline_miss_rate` and `mean_tardiness`: deadline resilience during disruption.\n";
+  report
+      << "- `constraint_violation_rate`: share of dispatched assignments that violated runtime feasibility checks.\n";
   report << "- `mean_assignment_churn` and `mean_replans`: plan stability under replanning pressure.\n";
   report
-      << "- `mean_utilization`: actor busy-capacity divided by total declared actor capacity in dynamic scenarios.\n\n";
+      << "- `mean_utilization`: actor busy-capacity divided by total declared actor capacity in dynamic scenarios.\n";
+  report << "- `preferred_actor_hit_ratio`, `mean_travel_distance`, and `mean_execution_cost`: affinity, locality, and "
+            "cost quality under runtime replanning.\n\n";
 
   report << "## Strategy scenarios\n\n";
   report << "| Scenario | Goal | Chaotic | Strategy | Mean latency (ns) | P95 latency (ns) | Completion ratio | "
-            "Deadline miss rate | Mean tardiness | Mean makespan | Utilization | Assignment churn | Replans | OK |\n";
-  report << "|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|\n";
+            "Deadline miss rate | Constraint violation rate | Mean tardiness | Mean makespan | Utilization | "
+            "Preferred actor hit ratio | Mean travel distance | Mean execution cost | Assignment churn | Replans | "
+            "OK |\n";
+  report << "|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|\n";
   for (const StrategyReportRow& row : strategy_rows) {
     report << "|" << row.scenario_name << "|" << goal_name(row.goal) << "|" << (row.chaotic ? "yes" : "no") << "|"
            << row.strategy_name << "|" << std::fixed << std::setprecision(2) << row.mean_latency_ns << "|"
            << row.p95_latency_ns << "|" << row.completion_ratio << "|" << row.deadline_miss_rate << "|"
-           << row.mean_tardiness << "|" << row.mean_makespan << "|" << row.mean_utilization << "|"
-           << row.mean_assignment_churn << "|" << row.mean_replans << "|" << (row.ok ? "yes" : "no") << "|\n";
+           << row.constraint_violation_rate << "|" << row.mean_tardiness << "|" << row.mean_makespan << "|"
+           << row.mean_utilization << "|" << row.preferred_actor_hit_ratio << "|" << row.mean_travel_distance << "|"
+           << row.mean_execution_cost << "|" << row.mean_assignment_churn << "|" << row.mean_replans << "|"
+           << (row.ok ? "yes" : "no") << "|\n";
   }
 
   report << "\n## Strategy recommendations\n\n";
@@ -1039,13 +1335,15 @@ std::string render_markdown_report(const StrategyBenchmarkConfig& config,
 std::string render_csv_report(const std::vector<StrategyReportRow>& strategy_rows) {
   std::ostringstream csv;
   csv << "scenario,goal,chaotic,strategy,mean_latency_ns,p95_latency_ns,completion_ratio,deadline_miss_rate,"
-         "mean_tardiness,mean_makespan,mean_utilization,mean_assignment_churn,mean_replans,ok\n";
+         "constraint_violation_rate,mean_tardiness,mean_makespan,mean_utilization,preferred_actor_hit_ratio,"
+         "mean_travel_distance,mean_execution_cost,mean_assignment_churn,mean_replans,ok\n";
   for (const StrategyReportRow& row : strategy_rows) {
     csv << row.scenario_name << "," << goal_name(row.goal) << "," << (row.chaotic ? "yes" : "no") << ","
         << row.strategy_name << "," << row.mean_latency_ns << "," << row.p95_latency_ns << "," << row.completion_ratio
-        << "," << row.deadline_miss_rate << "," << row.mean_tardiness << "," << row.mean_makespan << ","
-        << row.mean_utilization << "," << row.mean_assignment_churn << "," << row.mean_replans << ","
-        << (row.ok ? "yes" : "no") << "\n";
+        << "," << row.deadline_miss_rate << "," << row.constraint_violation_rate << "," << row.mean_tardiness << ","
+        << row.mean_makespan << "," << row.mean_utilization << "," << row.preferred_actor_hit_ratio << ","
+        << row.mean_travel_distance << "," << row.mean_execution_cost << "," << row.mean_assignment_churn << ","
+        << row.mean_replans << "," << (row.ok ? "yes" : "no") << "\n";
   }
   return csv.str();
 }
