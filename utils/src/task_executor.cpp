@@ -36,7 +36,7 @@ TaskExecutor::~TaskExecutor() noexcept { impl_->thread_pool.join(); }
 
 std::size_t TaskExecutor::worker_count() const noexcept { return impl_->configured_worker_count; }
 
-void TaskExecutor::enqueue(std::function<void()> task) noexcept {
+void TaskExecutor::enqueue(std::function<void()> task) {
   impl_->thread_pool.get_executor().post(std::move(task), std::allocator<void>{});
 }
 

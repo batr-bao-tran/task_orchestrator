@@ -16,6 +16,7 @@ enum class ActorRankingCriterion {
   EarliestFeasibleStart,
   EarliestFeasibleCompletion,
   DistanceToWork,
+  ExecutionCost,
   UptimeUtilisation,
   LeastLoaded,
   PreferredActor,
@@ -24,8 +25,10 @@ enum class ActorRankingCriterion {
 struct ActorRankingProfile {
   /** Ordered from most important to least important. */
   std::vector<ActorRankingCriterion> criteria = {
-      ActorRankingCriterion::EarliestFeasibleStart,
-      ActorRankingCriterion::UptimeUtilisation,
+      ActorRankingCriterion::EarliestFeasibleCompletion,
+      ActorRankingCriterion::PreferredActor,
+      ActorRankingCriterion::DistanceToWork,
+      ActorRankingCriterion::LeastLoaded,
   };
 };
 
@@ -89,7 +92,9 @@ class ActorRegistry {
 /** Greedy priority- and capacity-aware scheduler. */
 class Scheduler {
  public:
-  /** \param strategy If null, earliest-deadline-first is used. */
+  /** Greedy non-preemptive list scheduler with timed reservations and runtime constraint checks.
+   *  \param strategy If null, earliest-deadline-first is used.
+   */
   static ScheduleResult plan(const Workflow& workflow,
                              const WorkflowState& state,
                              const ActorRegistry& registry,

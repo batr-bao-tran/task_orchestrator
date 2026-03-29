@@ -54,8 +54,11 @@ TEST(SchedulerTest, PreferHigherPriority) {
       to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 1000}}, .current_load = 0});
   const auto result = to::Scheduler::plan(w2, state, reg2, 0);
   ASSERT_TRUE(result.ok);
-  ASSERT_EQ(1U, result.assignments.size());
+  ASSERT_EQ(2U, result.assignments.size());
   EXPECT_EQ("P2", result.assignments[0].task_id);
+  EXPECT_EQ(0, result.assignments[0].start_time);
+  EXPECT_EQ("P1", result.assignments[1].task_id);
+  EXPECT_EQ(10, result.assignments[1].start_time);
 }
 
 TEST(SchedulerTest, AlreadyAssignedTasksSkipped) {
@@ -534,5 +537,264 @@ TEST(SchedulerTest, PreferredActorCriterionChoosesPreferredCandidateWhenFeasible
   ASSERT_EQ(1U, result.assignments.size());
   EXPECT_EQ("preferred", result.assignments[0].actor_id);
   EXPECT_EQ(0U, result.ranking_decision_criterion_index.at("task"));
+}
+
+TEST(SchedulerTest, TimedReservationsAllowSequentialReuseOfTheSameActor) {
+  to::Workflow workflow("wf");
+  workflow.add_phase(
+      to::Phase{.id = "phase", .name = "Phase", .process_ids = {"pick", "pack"}, .dependency_phase_ids = {}});
+  workflow.add_process(to::Process{.id = "pick",
+                                   .phase_id = "phase",
+                                   .sub_process_ids = {},
+                                   .estimated_duration = 4,
+                                   .priority = 10,
+                                   .deadline = {}});
+  workflow.add_process(to::Process{.id = "pack",
+                                   .phase_id = "phase",
+                                   .sub_process_ids = {},
+                                   .estimated_duration = 3,
+                                   .priority = 5,
+                                   .deadline = {}});
+
+  to::ActorRegistry registry;
+  registry.add(
+      to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  const auto result = to::Scheduler::plan(workflow, to::WorkflowState{}, registry, 0);
+  ASSERT_TRUE(result.ok);
+  ASSERT_EQ(2U, result.assignments.size());
+  EXPECT_EQ("pick", result.assignments[0].task_id);
+  EXPECT_EQ(0, result.assignments[0].start_time);
+  EXPECT_EQ("pack", result.assignments[1].task_id);
+  EXPECT_EQ(4, result.assignments[1].start_time);
+}
+
+TEST(SchedulerTest, DependencyTasksAreScheduledAfterTheirPredecessorsComplete) {
+  to::Workflow workflow("wf");
+  workflow.add_phase(
+      to::Phase{.id = "phase", .name = "Phase", .process_ids = {"scan", "lift"}, .dependency_phase_ids = {}});
+  workflow.add_process(to::Process{.id = "scan",
+                                   .phase_id = "phase",
+                                   .sub_process_ids = {},
+                                   .estimated_duration = 3,
+                                   .priority = 10,
+                                   .deadline = 20});
+  workflow.add_process(to::Process{.id = "lift",
+                                   .phase_id = "phase",
+                                   .sub_process_ids = {},
+                                   .estimated_duration = 5,
+                                   .priority = 9,
+                                   .deadline = 20,
+                                   .dependency_task_ids = {"scan"}});
+
+  to::ActorRegistry registry;
+  registry.add(
+      to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  const auto result = to::Scheduler::plan(workflow, to::WorkflowState{}, registry, 0);
+  ASSERT_TRUE(result.ok);
+  ASSERT_EQ(2U, result.assignments.size());
+  EXPECT_EQ("scan", result.assignments[0].task_id);
+  EXPECT_EQ(0, result.assignments[0].start_time);
+  EXPECT_EQ("lift", result.assignments[1].task_id);
+  EXPECT_EQ(3, result.assignments[1].start_time);
+}
+
+TEST(SchedulerTest, ConstraintFiltersRespectActorTypeCapabilitiesAndLatestStartTime) {
+  to::Workflow workflow("wf");
+  workflow.add_phase(
+      to::Phase{.id = "phase", .name = "Phase", .process_ids = {"inspect", "handoff"}, .dependency_phase_ids = {}});
+  workflow.add_process(to::Process{.id = "inspect",
+                                   .phase_id = "phase",
+                                   .sub_process_ids = {},
+                                   .estimated_duration = 2,
+                                   .priority = 10,
+                                   .deadline = 10,
+                                   .latest_start_time = 2,
+                                   .allowed_actor_types = {"robot"},
+                                   .required_capabilities = {"scan"}});
+  workflow.add_process(to::Process{.id = "handoff",
+                                   .phase_id = "phase",
+                                   .sub_process_ids = {},
+                                   .estimated_duration = 2,
+                                   .priority = 5,
+                                   .deadline = 10,
+                                   .latest_start_time = 1,
+                                   .allowed_actor_ids = {"late_robot"},
+                                   .required_capabilities = {"scan"}});
+
+  to::ActorRegistry registry;
+  registry.add(to::Actor{.id = "scanner_robot",
+                         .type = "robot",
+                         .capacity = 1,
+                         .availability_windows = {{.start = 0, .end = 100}},
+                         .capabilities = {"scan"},
+                         .execution_cost_per_unit = 0.0,
+                         .current_load = 0});
+  registry.add(to::Actor{.id = "late_robot",
+                         .type = "robot",
+                         .capacity = 1,
+                         .availability_windows = {{.start = 4, .end = 100}},
+                         .capabilities = {"scan"},
+                         .execution_cost_per_unit = 0.0,
+                         .current_load = 0});
+  registry.add(to::Actor{.id = "human_scanner",
+                         .type = "human",
+                         .capacity = 1,
+                         .availability_windows = {{.start = 0, .end = 100}},
+                         .capabilities = {"scan"},
+                         .execution_cost_per_unit = 0.0,
+                         .current_load = 0});
+
+  const auto result = to::Scheduler::plan(workflow, to::WorkflowState{}, registry, 0);
+  ASSERT_TRUE(result.ok);
+  ASSERT_EQ(1U, result.assignments.size());
+  EXPECT_EQ("inspect", result.assignments[0].task_id);
+  EXPECT_EQ("scanner_robot", result.assignments[0].actor_id);
+}
+
+TEST(SchedulerTest, MutualExclusionPreventsConflictingTasksFromBeingPlannedTogether) {
+  to::Workflow workflow("wf");
+  workflow.add_phase(
+      to::Phase{.id = "phase", .name = "Phase", .process_ids = {"critical", "fallback"}, .dependency_phase_ids = {}});
+  workflow.add_process(to::Process{.id = "critical",
+                                   .phase_id = "phase",
+                                   .sub_process_ids = {},
+                                   .estimated_duration = 3,
+                                   .priority = 10,
+                                   .deadline = 20,
+                                   .mutually_exclusive_task_ids = {"fallback"}});
+  workflow.add_process(to::Process{.id = "fallback",
+                                   .phase_id = "phase",
+                                   .sub_process_ids = {},
+                                   .estimated_duration = 3,
+                                   .priority = 1,
+                                   .deadline = 20,
+                                   .mutually_exclusive_task_ids = {"critical"}});
+
+  to::ActorRegistry registry;
+  registry.add(
+      to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  const auto result = to::Scheduler::plan(workflow, to::WorkflowState{}, registry, 0);
+  ASSERT_TRUE(result.ok);
+  ASSERT_EQ(1U, result.assignments.size());
+  EXPECT_EQ("critical", result.assignments[0].task_id);
+}
+
+TEST(SchedulerTest, DemandConstraintUsesHigherCapacityActorAndExecutionCostRanking) {
+  to::Workflow workflow("wf");
+  workflow.add_phase(to::Phase{.id = "phase", .name = "Phase", .process_ids = {"bulk"}, .dependency_phase_ids = {}});
+  workflow.add_process(to::Process{.id = "bulk",
+                                   .phase_id = "phase",
+                                   .sub_process_ids = {},
+                                   .estimated_duration = 4,
+                                   .priority = 10,
+                                   .deadline = 20,
+                                   .demand = 2});
+
+  to::ActorRegistry registry;
+  registry.add(to::Actor{.id = "expensive_big",
+                         .type = "robot",
+                         .capacity = 2,
+                         .availability_windows = {{.start = 0, .end = 100}},
+                         .capabilities = {},
+                         .execution_cost_per_unit = 5.0,
+                         .current_load = 0});
+  registry.add(to::Actor{.id = "cheap_big",
+                         .type = "robot",
+                         .capacity = 2,
+                         .availability_windows = {{.start = 0, .end = 100}},
+                         .capabilities = {},
+                         .execution_cost_per_unit = 1.0,
+                         .current_load = 0});
+  registry.add(to::Actor{.id = "small",
+                         .type = "robot",
+                         .capacity = 1,
+                         .availability_windows = {{.start = 0, .end = 100}},
+                         .capabilities = {},
+                         .execution_cost_per_unit = 0.5,
+                         .current_load = 0});
+
+  const to::ActorRankingProfile profile{
+      .criteria = {to::ActorRankingCriterion::ExecutionCost, to::ActorRankingCriterion::EarliestFeasibleCompletion}};
+  const auto result = to::Scheduler::plan(workflow, to::WorkflowState{}, registry, 0, nullptr, &profile);
+
+  ASSERT_TRUE(result.ok);
+  ASSERT_EQ(1U, result.assignments.size());
+  EXPECT_EQ("cheap_big", result.assignments[0].actor_id);
+}
+
+TEST(SchedulerTest, PreemptibleTasksReportUnsupportedSchedulerConstraint) {
+  to::Workflow workflow("wf");
+  workflow.add_phase(to::Phase{.id = "phase", .name = "Phase", .process_ids = {"task"}, .dependency_phase_ids = {}});
+  workflow.add_process(to::Process{.id = "task",
+                                   .phase_id = "phase",
+                                   .sub_process_ids = {},
+                                   .estimated_duration = 2,
+                                   .priority = 1,
+                                   .deadline = 10,
+                                   .preemptible = true});
+
+  to::ActorRegistry registry;
+  registry.add(
+      to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  const auto result = to::Scheduler::plan(workflow, to::WorkflowState{}, registry, 0);
+  EXPECT_FALSE(result.ok);
+  EXPECT_TRUE(result.assignments.empty());
+  EXPECT_NE(std::string::npos, result.error_message.find("Preemptible tasks"));
+}
+
+TEST(SchedulerTest, ResumableTaskStateCanBePlannedAgainAfterFailure) {
+  to::Workflow workflow("wf");
+  workflow.add_phase(to::Phase{.id = "phase", .name = "Phase", .process_ids = {"task"}, .dependency_phase_ids = {}});
+  workflow.add_process(to::Process{.id = "task",
+                                   .phase_id = "phase",
+                                   .sub_process_ids = {},
+                                   .estimated_duration = 2,
+                                   .priority = 1,
+                                   .deadline = {}});
+
+  to::WorkflowState state;
+  state.resumable_tasks = {"task"};
+  state.task_planned_start_time["task"] = 0;
+  state.task_planned_end_time["task"] = 2;
+
+  to::ActorRegistry registry;
+  registry.add(
+      to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  const auto result = to::Scheduler::plan(workflow, state, registry, 3);
+  ASSERT_TRUE(result.ok);
+  ASSERT_EQ(1U, result.assignments.size());
+  EXPECT_EQ("task", result.assignments[0].task_id);
+  EXPECT_EQ(3, result.assignments[0].start_time);
+}
+
+TEST(SchedulerTest, PendingSiblingTaskCanBePlannedAfterAnotherTaskCompletes) {
+  to::Workflow workflow("wf");
+  workflow.add_phase(
+      to::Phase{.id = "phase", .name = "Phase", .process_ids = {"P1", "P2"}, .dependency_phase_ids = {}});
+  workflow.add_process(to::Process{
+      .id = "P1", .phase_id = "phase", .sub_process_ids = {}, .estimated_duration = 5, .priority = 10, .deadline = {}});
+  workflow.add_process(to::Process{
+      .id = "P2", .phase_id = "phase", .sub_process_ids = {}, .estimated_duration = 4, .priority = 1, .deadline = {}});
+
+  to::WorkflowState state;
+  state.completed_tasks = {"P1"};
+  state.task_actual_completion_time["P1"] = 5;
+  state.task_planned_start_time["P1"] = 0;
+  state.task_planned_end_time["P1"] = 5;
+
+  to::ActorRegistry registry;
+  registry.add(
+      to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 100}}, .current_load = 0});
+
+  const auto result = to::Scheduler::plan(workflow, state, registry, 5);
+  ASSERT_TRUE(result.ok);
+  ASSERT_EQ(1U, result.assignments.size());
+  EXPECT_EQ("P2", result.assignments[0].task_id);
+  EXPECT_EQ(5, result.assignments[0].start_time);
 }
 }  // namespace

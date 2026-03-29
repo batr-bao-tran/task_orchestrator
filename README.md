@@ -13,13 +13,14 @@ More architectural context lives in [DESIGN.md](DESIGN.md).
 
 - Structured YAML workflow input for stable integrations
 - Controlled natural-language workflow input for deterministic text-based requests
-- Runtime workflow submission and re-orchestration
 - Actor and task overrides during runtime
 - Optional HTTP and gRPC transports with shared auth and TLS configuration
 - Three optimizer backends:
   - `indexed_exact` in the default build
   - `ortools_cp_sat` in the optional-backend build
   - `commercial_mip` in the optional-backend build
+- Runtime workflow submission and re-orchestration
+- Runtime scheduling that honors optimizer-derived non-preemptive constraints including actor eligibility, required capabilities, demand, release windows, latest-start windows, deadlines, dependencies, and mutual exclusions. The runtime scheduler shares the optimizer's non-preemptive feasibility model, so affinity hints such as preferred actors, travel distances, and execution costs can influence runtime ranking without relaxing correctness checks.
 
 ## Requirements
 

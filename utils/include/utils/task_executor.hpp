@@ -39,7 +39,7 @@ class TaskExecutor {
   [[nodiscard]] std::size_t worker_count() const noexcept;
 
  private:
-  void enqueue(std::function<void()> task) noexcept;
+  void enqueue(std::function<void()> task);
 
   struct Impl;
   std::unique_ptr<Impl> impl_;

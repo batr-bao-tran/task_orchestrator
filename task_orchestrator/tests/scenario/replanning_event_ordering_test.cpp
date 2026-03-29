@@ -119,6 +119,77 @@ TEST(ReplanningEventOrderingTest, TaskResumableBeforeReplanTickSchedulesAtFirstT
   EXPECT_EQ(failed_task, result.assignments.front().task_id);
 }
 
+TEST(ReplanningEventOrderingTest, TaskResumableThenTickAtSameTimestampSchedulesWithoutExtraDelay) {
+  to::Orchestrator o;
+  setup_orchestrator(o);
+  const auto* state = o.workflow_state();
+  ASSERT_NE(nullptr, state);
+  ASSERT_FALSE(state->assigned_tasks.empty());
+  const auto failed_task = state->assigned_tasks.front();
+
+  to::SimClock clock;
+  clock.schedule_at(5, [&](to::SimClock::Time) { o.notify_task_failed(failed_task, false); });
+  clock.schedule_at(6, [&](to::SimClock::Time) { o.mark_task_resumable(failed_task); });
+  clock.schedule_at(6, [&](to::SimClock::Time t) { o.tick(t); });
+  clock.schedule_at(7, [&](to::SimClock::Time t) { o.tick(t); });
+  clock.run_until(7);
+
+  const auto* final_state = o.workflow_state();
+  ASSERT_NE(nullptr, final_state);
+  auto owner = final_state->task_actor.find(failed_task);
+  ASSERT_NE(owner, final_state->task_actor.end());
+}
+
+TEST(ReplanningEventOrderingTest, TickThenTaskResumableAtSameTimestampNeedsNextTick) {
+  to::Orchestrator o;
+  setup_orchestrator(o);
+  const auto* state = o.workflow_state();
+  ASSERT_NE(nullptr, state);
+  ASSERT_FALSE(state->assigned_tasks.empty());
+  const auto failed_task = state->assigned_tasks.front();
+
+  to::SimClock clock;
+  clock.schedule_at(5, [&](to::SimClock::Time) { o.notify_task_failed(failed_task, false); });
+  clock.schedule_at(6, [&](to::SimClock::Time t) { o.tick(t); });
+  clock.schedule_at(6, [&](to::SimClock::Time) { o.mark_task_resumable(failed_task); });
+  clock.run_until(7);
+
+  const auto* deferred_state = o.workflow_state();
+  ASSERT_NE(nullptr, deferred_state);
+  EXPECT_EQ(deferred_state->task_actor.end(), deferred_state->task_actor.find(failed_task));
+
+  clock.schedule_at(8, [&](to::SimClock::Time t) { o.tick(t); });
+  clock.schedule_at(9, [&](to::SimClock::Time t) { o.tick(t); });
+  clock.run_until(9);
+
+  const auto* final_state = o.workflow_state();
+  ASSERT_NE(nullptr, final_state);
+  EXPECT_NE(final_state->task_actor.end(), final_state->task_actor.find(failed_task));
+}
+
+TEST(ReplanningEventOrderingTest, AvailabilityRestoredBeforeSameTimestampTickReusesRecoveredActor) {
+  to::Orchestrator o;
+  setup_orchestrator(o);
+  const auto* state = o.workflow_state();
+  ASSERT_NE(nullptr, state);
+  ASSERT_FALSE(state->assigned_tasks.empty());
+  const auto failed_task = state->assigned_tasks.front();
+
+  to::SimClock clock;
+  clock.schedule_at(5, [&](to::SimClock::Time) { o.notify_task_failed(failed_task, true); });
+  clock.schedule_at(5, [&](to::SimClock::Time) { o.set_actor_unavailable("A1", true); });
+  clock.schedule_at(5, [&](to::SimClock::Time) { o.set_actor_unavailable("A1", false); });
+  clock.schedule_at(5, [&](to::SimClock::Time t) { o.tick(t); });
+  clock.schedule_at(6, [&](to::SimClock::Time t) { o.tick(t); });
+  clock.run_until(10);
+
+  const auto* final_state = o.workflow_state();
+  ASSERT_NE(nullptr, final_state);
+  auto owner = final_state->task_actor.find(failed_task);
+  ASSERT_NE(owner, final_state->task_actor.end());
+  EXPECT_EQ("A1", owner->second);
+}
+
 TEST(ReplanningEventOrderingTest, TriggerBurstProducesDeterministicSinglePlanOutcome) {
   to::Orchestrator o;
   setup_orchestrator(o);

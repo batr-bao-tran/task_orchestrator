@@ -31,6 +31,8 @@ namespace task_orchestrator::app {
 
 namespace detail {
 
+namespace {
+
 namespace pb = task_orchestrator::protocol::pb;
 
 inline constexpr std::string_view kReadFromStdinPath = "-";
@@ -44,13 +46,15 @@ inline constexpr std::string_view kCommandReorchestrate = "reorchestrate";
 inline constexpr int kCliPollTimeoutMs = 200;
 inline constexpr auto kShutdownPollInterval = std::chrono::milliseconds(kCliPollTimeoutMs);
 
-static volatile std::sig_atomic_t g_shutdown_requested = 0;
+volatile std::sig_atomic_t g_shutdown_requested = 0;
+
+void handle_interrupt_signal(int) { g_shutdown_requested = 1; }
+
+bool shutdown_requested() { return g_shutdown_requested != 0; }
+
+}  // namespace
 
 std::shared_ptr<spdlog::logger> application_logger() { return get_logger(LogLayer::Application); }
-
-static void handle_interrupt_signal(int) { g_shutdown_requested = 1; }
-
-static bool shutdown_requested() { return g_shutdown_requested != 0; }
 
 void install_signal_handlers() {
   std::signal(SIGINT, handle_interrupt_signal);

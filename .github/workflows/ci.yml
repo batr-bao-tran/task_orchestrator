@@ -31,35 +31,87 @@ jobs:
       - name: Compute Bazel cache settings
         id: bazel-cache
         run: |
-          echo "cache_dir=${RUNNER_TEMP}/bazel-cache/${{ matrix.os }}" >> "${GITHUB_OUTPUT}"
-          echo "cache_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-${{ matrix.os }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}" >> "${GITHUB_OUTPUT}"
-          echo "restore_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-${{ matrix.os }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-" >> "${GITHUB_OUTPUT}"
+          {
+            echo "disk_cache_dir=${RUNNER_TEMP}/bazel-disk-cache/${{ matrix.os }}"
+            echo "disk_cache_key=bazel-disk-${{ env.BAZEL_CACHE_VERSION }}-${{ matrix.os }}-default-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}"
+            echo "disk_restore_key=bazel-disk-${{ env.BAZEL_CACHE_VERSION }}-${{ matrix.os }}-default-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-"
+            echo "repository_cache_dir=${RUNNER_TEMP}/bazel-repository-cache/${{ matrix.os }}"
+            echo "repository_cache_key=bazel-repository-${{ env.BAZEL_CACHE_VERSION }}-${{ matrix.os }}-${{ hashFiles('.bazelversion', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}"
+            echo "repository_restore_key=bazel-repository-${{ env.BAZEL_CACHE_VERSION }}-${{ matrix.os }}-${{ hashFiles('.bazelversion', 'MODULE.bazel', 'MODULE.bazel.lock') }}-"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
         with:
           bazel_version: ${{ env.BAZEL_VERSION }}
 
-      - name: Restore Bazel cache
-        id: restore-bazel-cache
+      - name: Restore Bazel disk cache
+        id: restore-disk-cache
         uses: actions/cache/restore@v4
         with:
-          path: ${{ steps.bazel-cache.outputs.cache_dir }}
-          key: ${{ steps.bazel-cache.outputs.cache_key }}
+          path: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.disk_cache_key }}
           restore-keys: |
-            ${{ steps.bazel-cache.outputs.restore_key }}
+            ${{ steps.bazel-cache.outputs.disk_restore_key }}
+
+      - name: Restore Bazel repository cache
+        id: restore-repository-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.repository_cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.repository_cache_key }}
+          restore-keys: |
+            ${{ steps.bazel-cache.outputs.repository_restore_key }}
 
       - name: Build
         env:
-          BAZEL_CI_CACHE_DIR: ${{ steps.bazel-cache.outputs.cache_dir }}
+          BAZEL_CI_DISK_CACHE_DIR: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          BAZEL_CI_REPOSITORY_CACHE_DIR: ${{ steps.bazel-cache.outputs.repository_cache_dir }}
         run: tools/ci/bazel_ci.sh build --config=linux //...
 
-      - name: Save Bazel cache
-        if: steps.restore-bazel-cache.outputs.cache-hit != 'true'
+      - name: Pack Bazel disk cache for downstream jobs
+        run: |
+          mkdir -p "${{ steps.bazel-cache.outputs.disk_cache_dir }}"
+          tar -cf "${RUNNER_TEMP}/bazel-disk-cache-${{ matrix.os }}.tar" \
+            -C "${{ steps.bazel-cache.outputs.disk_cache_dir }}" \
+            .
+
+      - name: Upload Bazel disk cache artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bazel-disk-cache-${{ matrix.os }}-${{ github.sha }}
+          path: ${{ runner.temp }}/bazel-disk-cache-${{ matrix.os }}.tar
+          retention-days: 1
+          compression-level: 0
+
+      - name: Pack Bazel repository cache for downstream jobs
+        run: |
+          mkdir -p "${{ steps.bazel-cache.outputs.repository_cache_dir }}"
+          tar -cf "${RUNNER_TEMP}/bazel-repository-cache-${{ matrix.os }}.tar" \
+            -C "${{ steps.bazel-cache.outputs.repository_cache_dir }}" \
+            .
+
+      - name: Upload Bazel repository cache artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bazel-repository-cache-${{ matrix.os }}-${{ github.sha }}
+          path: ${{ runner.temp }}/bazel-repository-cache-${{ matrix.os }}.tar
+          retention-days: 1
+          compression-level: 0
+
+      - name: Save Bazel disk cache
+        if: steps.restore-disk-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ${{ steps.bazel-cache.outputs.cache_dir }}
-          key: ${{ steps.bazel-cache.outputs.cache_key }}
+          path: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.disk_cache_key }}
+
+      - name: Save Bazel repository cache
+        if: steps.restore-repository-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.repository_cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.repository_cache_key }}
 
   linux-test:
     needs: linux-build
@@ -77,26 +129,46 @@ jobs:
       - name: Compute Bazel cache settings
         id: bazel-cache
         run: |
-          echo "cache_dir=${RUNNER_TEMP}/bazel-cache/${{ matrix.os }}" >> "${GITHUB_OUTPUT}"
-          echo "cache_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-${{ matrix.os }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}" >> "${GITHUB_OUTPUT}"
-          echo "restore_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-${{ matrix.os }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-" >> "${GITHUB_OUTPUT}"
+          {
+            echo "disk_cache_dir=${RUNNER_TEMP}/bazel-disk-cache/${{ matrix.os }}"
+            echo "repository_cache_dir=${RUNNER_TEMP}/bazel-repository-cache/${{ matrix.os }}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
         with:
           bazel_version: ${{ env.BAZEL_VERSION }}
 
-      - name: Restore Bazel cache
-        uses: actions/cache/restore@v4
+      - name: Download Bazel disk cache artifact
+        uses: actions/download-artifact@v4
         with:
-          path: ${{ steps.bazel-cache.outputs.cache_dir }}
-          key: ${{ steps.bazel-cache.outputs.cache_key }}
-          restore-keys: |
-            ${{ steps.bazel-cache.outputs.restore_key }}
+          name: bazel-disk-cache-${{ matrix.os }}-${{ github.sha }}
+          path: ${{ runner.temp }}
+
+      - name: Restore build job Bazel disk cache
+        run: |
+          rm -rf "${{ steps.bazel-cache.outputs.disk_cache_dir }}"
+          mkdir -p "${{ steps.bazel-cache.outputs.disk_cache_dir }}"
+          tar -xf "${RUNNER_TEMP}/bazel-disk-cache-${{ matrix.os }}.tar" \
+            -C "${{ steps.bazel-cache.outputs.disk_cache_dir }}"
+
+      - name: Download Bazel repository cache artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bazel-repository-cache-${{ matrix.os }}-${{ github.sha }}
+          path: ${{ runner.temp }}
+
+      - name: Restore build job Bazel repository cache
+        run: |
+          rm -rf "${{ steps.bazel-cache.outputs.repository_cache_dir }}"
+          mkdir -p "${{ steps.bazel-cache.outputs.repository_cache_dir }}"
+          tar -xf "${RUNNER_TEMP}/bazel-repository-cache-${{ matrix.os }}.tar" \
+            -C "${{ steps.bazel-cache.outputs.repository_cache_dir }}"
 
       - name: Test
         env:
-          BAZEL_CI_CACHE_DIR: ${{ steps.bazel-cache.outputs.cache_dir }}
+          BAZEL_CI_DISK_CACHE_DIR: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          BAZEL_CI_REPOSITORY_CACHE_DIR: ${{ steps.bazel-cache.outputs.repository_cache_dir }}
         run: tools/ci/bazel_ci.sh test --config=linux //... --test_output=errors
 
   macos-smoke:
@@ -112,27 +184,42 @@ jobs:
       - name: Compute Bazel cache settings
         id: bazel-cache
         run: |
-          echo "cache_dir=${RUNNER_TEMP}/bazel-cache/macos-15" >> "${GITHUB_OUTPUT}"
-          echo "cache_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-macos-15-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}" >> "${GITHUB_OUTPUT}"
-          echo "restore_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-macos-15-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-" >> "${GITHUB_OUTPUT}"
+          {
+            echo "disk_cache_dir=${RUNNER_TEMP}/bazel-disk-cache/macos-15"
+            echo "disk_cache_key=bazel-disk-${{ env.BAZEL_CACHE_VERSION }}-macos-15-default-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}"
+            echo "disk_restore_key=bazel-disk-${{ env.BAZEL_CACHE_VERSION }}-macos-15-default-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-"
+            echo "repository_cache_dir=${RUNNER_TEMP}/bazel-repository-cache/macos-15"
+            echo "repository_cache_key=bazel-repository-${{ env.BAZEL_CACHE_VERSION }}-macos-15-${{ hashFiles('.bazelversion', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}"
+            echo "repository_restore_key=bazel-repository-${{ env.BAZEL_CACHE_VERSION }}-macos-15-${{ hashFiles('.bazelversion', 'MODULE.bazel', 'MODULE.bazel.lock') }}-"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
         with:
           bazel_version: ${{ env.BAZEL_VERSION }}
 
-      - name: Restore Bazel cache
-        id: restore-bazel-cache
+      - name: Restore Bazel disk cache
+        id: restore-disk-cache
         uses: actions/cache/restore@v4
         with:
-          path: ${{ steps.bazel-cache.outputs.cache_dir }}
-          key: ${{ steps.bazel-cache.outputs.cache_key }}
+          path: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.disk_cache_key }}
           restore-keys: |
-            ${{ steps.bazel-cache.outputs.restore_key }}
+            ${{ steps.bazel-cache.outputs.disk_restore_key }}
+
+      - name: Restore Bazel repository cache
+        id: restore-repository-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.repository_cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.repository_cache_key }}
+          restore-keys: |
+            ${{ steps.bazel-cache.outputs.repository_restore_key }}
 
       - name: Build macOS smoke targets
         env:
-          BAZEL_CI_CACHE_DIR: ${{ steps.bazel-cache.outputs.cache_dir }}
+          BAZEL_CI_DISK_CACHE_DIR: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          BAZEL_CI_REPOSITORY_CACHE_DIR: ${{ steps.bazel-cache.outputs.repository_cache_dir }}
         run: |
           tools/ci/bazel_ci.sh build --config=darwin \
             //application:run_config \
@@ -142,7 +229,8 @@ jobs:
 
       - name: Run macOS smoke tests
         env:
-          BAZEL_CI_CACHE_DIR: ${{ steps.bazel-cache.outputs.cache_dir }}
+          BAZEL_CI_DISK_CACHE_DIR: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          BAZEL_CI_REPOSITORY_CACHE_DIR: ${{ steps.bazel-cache.outputs.repository_cache_dir }}
         run: |
           tools/ci/bazel_ci.sh test --config=darwin \
             //application/tests:config_loader_test \
@@ -150,12 +238,19 @@ jobs:
             //task_orchestrator/tests/unit:optimizer_test \
             --test_output=errors
 
-      - name: Save Bazel cache
-        if: steps.restore-bazel-cache.outputs.cache-hit != 'true'
+      - name: Save Bazel disk cache
+        if: steps.restore-disk-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ${{ steps.bazel-cache.outputs.cache_dir }}
-          key: ${{ steps.bazel-cache.outputs.cache_key }}
+          path: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.disk_cache_key }}
+
+      - name: Save Bazel repository cache
+        if: steps.restore-repository-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.repository_cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.repository_cache_key }}
 
   lint:
     needs: linux-build
@@ -169,26 +264,46 @@ jobs:
       - name: Compute Bazel cache settings
         id: bazel-cache
         run: |
-          echo "cache_dir=${RUNNER_TEMP}/bazel-cache/ubuntu-24.04" >> "${GITHUB_OUTPUT}"
-          echo "cache_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-ubuntu-24.04-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}" >> "${GITHUB_OUTPUT}"
-          echo "restore_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-ubuntu-24.04-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-" >> "${GITHUB_OUTPUT}"
+          {
+            echo "disk_cache_dir=${RUNNER_TEMP}/bazel-disk-cache/ubuntu-24.04"
+            echo "repository_cache_dir=${RUNNER_TEMP}/bazel-repository-cache/ubuntu-24.04"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
         with:
           bazel_version: ${{ env.BAZEL_VERSION }}
 
-      - name: Restore Bazel cache
-        uses: actions/cache/restore@v4
+      - name: Download Bazel disk cache artifact
+        uses: actions/download-artifact@v4
         with:
-          path: ${{ steps.bazel-cache.outputs.cache_dir }}
-          key: ${{ steps.bazel-cache.outputs.cache_key }}
-          restore-keys: |
-            ${{ steps.bazel-cache.outputs.restore_key }}
+          name: bazel-disk-cache-ubuntu-24.04-${{ github.sha }}
+          path: ${{ runner.temp }}
+
+      - name: Restore build job Bazel disk cache
+        run: |
+          rm -rf "${{ steps.bazel-cache.outputs.disk_cache_dir }}"
+          mkdir -p "${{ steps.bazel-cache.outputs.disk_cache_dir }}"
+          tar -xf "${RUNNER_TEMP}/bazel-disk-cache-ubuntu-24.04.tar" \
+            -C "${{ steps.bazel-cache.outputs.disk_cache_dir }}"
+
+      - name: Download Bazel repository cache artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bazel-repository-cache-ubuntu-24.04-${{ github.sha }}
+          path: ${{ runner.temp }}
+
+      - name: Restore build job Bazel repository cache
+        run: |
+          rm -rf "${{ steps.bazel-cache.outputs.repository_cache_dir }}"
+          mkdir -p "${{ steps.bazel-cache.outputs.repository_cache_dir }}"
+          tar -xf "${RUNNER_TEMP}/bazel-repository-cache-ubuntu-24.04.tar" \
+            -C "${{ steps.bazel-cache.outputs.repository_cache_dir }}"
 
       - name: Build compile database inputs
         env:
-          BAZEL_CI_CACHE_DIR: ${{ steps.bazel-cache.outputs.cache_dir }}
+          BAZEL_CI_DISK_CACHE_DIR: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          BAZEL_CI_REPOSITORY_CACHE_DIR: ${{ steps.bazel-cache.outputs.repository_cache_dir }}
         run: tools/ci/bazel_ci.sh build --config=linux //...
 
       - name: Set up Python
@@ -214,27 +329,52 @@ jobs:
       - name: Compute Bazel cache settings
         id: bazel-cache
         run: |
-          echo "cache_dir=${RUNNER_TEMP}/bazel-cache/ubuntu-24.04" >> "${GITHUB_OUTPUT}"
-          echo "cache_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-ubuntu-24.04-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}" >> "${GITHUB_OUTPUT}"
-          echo "restore_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-ubuntu-24.04-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-" >> "${GITHUB_OUTPUT}"
+          {
+            echo "disk_cache_dir=${RUNNER_TEMP}/bazel-disk-cache/ubuntu-24.04-sanitize"
+            echo "disk_cache_key=bazel-disk-${{ env.BAZEL_CACHE_VERSION }}-ubuntu-24.04-sanitize-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}"
+            echo "disk_restore_key=bazel-disk-${{ env.BAZEL_CACHE_VERSION }}-ubuntu-24.04-sanitize-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-"
+            echo "repository_cache_dir=${RUNNER_TEMP}/bazel-repository-cache/ubuntu-24.04"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
         with:
           bazel_version: ${{ env.BAZEL_VERSION }}
 
-      - name: Restore Bazel cache
+      - name: Restore Bazel disk cache
+        id: restore-disk-cache
         uses: actions/cache/restore@v4
         with:
-          path: ${{ steps.bazel-cache.outputs.cache_dir }}
-          key: ${{ steps.bazel-cache.outputs.cache_key }}
+          path: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.disk_cache_key }}
           restore-keys: |
-            ${{ steps.bazel-cache.outputs.restore_key }}
+            ${{ steps.bazel-cache.outputs.disk_restore_key }}
+
+      - name: Download Bazel repository cache artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bazel-repository-cache-ubuntu-24.04-${{ github.sha }}
+          path: ${{ runner.temp }}
+
+      - name: Restore build job Bazel repository cache
+        run: |
+          rm -rf "${{ steps.bazel-cache.outputs.repository_cache_dir }}"
+          mkdir -p "${{ steps.bazel-cache.outputs.repository_cache_dir }}"
+          tar -xf "${RUNNER_TEMP}/bazel-repository-cache-ubuntu-24.04.tar" \
+            -C "${{ steps.bazel-cache.outputs.repository_cache_dir }}"
 
       - name: Run sanitizer suite
         env:
-          BAZEL_CI_CACHE_DIR: ${{ steps.bazel-cache.outputs.cache_dir }}
+          BAZEL_CI_DISK_CACHE_DIR: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          BAZEL_CI_REPOSITORY_CACHE_DIR: ${{ steps.bazel-cache.outputs.repository_cache_dir }}
         run: tools/testing/run_sanitizers.sh
+
+      - name: Save Bazel disk cache
+        if: steps.restore-disk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.disk_cache_key }}
 
   coverage:
     needs: linux-build
@@ -248,27 +388,52 @@ jobs:
       - name: Compute Bazel cache settings
         id: bazel-cache
         run: |
-          echo "cache_dir=${RUNNER_TEMP}/bazel-cache/ubuntu-24.04" >> "${GITHUB_OUTPUT}"
-          echo "cache_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-ubuntu-24.04-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}" >> "${GITHUB_OUTPUT}"
-          echo "restore_key=bazel-${{ env.BAZEL_CACHE_VERSION }}-ubuntu-24.04-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-" >> "${GITHUB_OUTPUT}"
+          {
+            echo "disk_cache_dir=${RUNNER_TEMP}/bazel-disk-cache/ubuntu-24.04-coverage"
+            echo "disk_cache_key=bazel-disk-${{ env.BAZEL_CACHE_VERSION }}-ubuntu-24.04-coverage-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.sha }}"
+            echo "disk_restore_key=bazel-disk-${{ env.BAZEL_CACHE_VERSION }}-ubuntu-24.04-coverage-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel', 'MODULE.bazel.lock') }}-"
+            echo "repository_cache_dir=${RUNNER_TEMP}/bazel-repository-cache/ubuntu-24.04"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Set up Bazel
         uses: bazel-contrib/setup-bazel@0.8.0
         with:
           bazel_version: ${{ env.BAZEL_VERSION }}
 
-      - name: Restore Bazel cache
+      - name: Restore Bazel disk cache
+        id: restore-disk-cache
         uses: actions/cache/restore@v4
         with:
-          path: ${{ steps.bazel-cache.outputs.cache_dir }}
-          key: ${{ steps.bazel-cache.outputs.cache_key }}
+          path: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.disk_cache_key }}
           restore-keys: |
-            ${{ steps.bazel-cache.outputs.restore_key }}
+            ${{ steps.bazel-cache.outputs.disk_restore_key }}
+
+      - name: Download Bazel repository cache artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bazel-repository-cache-ubuntu-24.04-${{ github.sha }}
+          path: ${{ runner.temp }}
+
+      - name: Restore build job Bazel repository cache
+        run: |
+          rm -rf "${{ steps.bazel-cache.outputs.repository_cache_dir }}"
+          mkdir -p "${{ steps.bazel-cache.outputs.repository_cache_dir }}"
+          tar -xf "${RUNNER_TEMP}/bazel-repository-cache-ubuntu-24.04.tar" \
+            -C "${{ steps.bazel-cache.outputs.repository_cache_dir }}"
 
       - name: Run coverage
         env:
-          BAZEL_CI_CACHE_DIR: ${{ steps.bazel-cache.outputs.cache_dir }}
+          BAZEL_CI_DISK_CACHE_DIR: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          BAZEL_CI_REPOSITORY_CACHE_DIR: ${{ steps.bazel-cache.outputs.repository_cache_dir }}
         run: tools/testing/check_coverage.sh 90
+
+      - name: Save Bazel disk cache
+        if: steps.restore-disk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.bazel-cache.outputs.disk_cache_dir }}
+          key: ${{ steps.bazel-cache.outputs.disk_cache_key }}
 
       - name: Export coverage report
         run: cp "$(bazel info output_path)/_coverage/_coverage_report.dat" coverage-report.lcov

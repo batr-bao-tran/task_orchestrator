@@ -3,6 +3,8 @@
 set -euo pipefail
 
 readonly DEFAULT_BAZEL_VERSION="8.5.0"
+readonly SANITIZER_BUILD_TARGETS="//..."
+readonly SANITIZER_TEST_QUERY="tests(//...)"
 bazel_version="${USE_BAZEL_VERSION:-$DEFAULT_BAZEL_VERSION}"
 
 bazel_cmd() {
@@ -13,20 +15,19 @@ bazel_cmd() {
   USE_BAZEL_VERSION="${bazel_version}" bazel "$@"
 }
 
-readonly -a SANITIZER_TEST_TARGETS=(
-  "//application/tests:application_test"
-  "//application/tests:application_detail_test"
-  "//application/tests:config_loader_test"
-  "//application/tests:runtime_api_test"
-  "//application/runtime_service/tests:in_memory_runtime_service_test"
-  "//protocol/tests:grpc_transport_internal_test"
-  "//protocol/tests:http_transport_internal_test"
-  "//protocol/tests:tls_credentials_test"
-  "//utils/tests:generator_test"
-  "//utils/tests:task_executor_test"
-)
+mapfile -t sanitizer_test_targets < <(bazel_cmd query "${SANITIZER_TEST_QUERY}")
+
+if [[ "${#sanitizer_test_targets[@]}" -eq 0 ]]; then
+  printf 'No Bazel test targets matched %s\n' "${SANITIZER_TEST_QUERY}" >&2
+  exit 1
+fi
+
+bazel_cmd build \
+  --config=linux \
+  --config=sanitize \
+  "${SANITIZER_BUILD_TARGETS}"
 
 bazel_cmd test \
   --config=linux \
   --config=sanitize \
-  "${SANITIZER_TEST_TARGETS[@]}"
+  "${sanitizer_test_targets[@]}"

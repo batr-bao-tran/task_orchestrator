@@ -16,12 +16,13 @@ The benchmarks produce Markdown and CSV reports with the following KPI groups:
 | `mean_latency_ns`, `p95_latency_ns` | Planning or solve latency |
 | `completion_ratio`, `fulfillment_ratio` | Share of work completed or assigned |
 | `deadline_miss_rate`, `mean_tardiness` | Deadline quality under pressure |
+| `constraint_violation_rate` | Share of dispatched runtime assignments that broke feasibility checks |
 | `mean_makespan` | Time to finish the scheduled workload |
 | `mean_utilization` | Busy capacity divided by total declared actor capacity in dynamic scenarios |
 | `mean_assignment_churn` | How much the future plan changes across replans |
 | `mean_replans` | How often the scenario triggers replanning |
-| `preferred_actor_hit_ratio` | How often a backend honors preferred actors |
-| `mean_travel_distance`, `mean_execution_cost` | Cost-oriented optimizer quality signals |
+| `preferred_actor_hit_ratio` | How often a runtime strategy or optimizer backend honors preferred actors when a preference exists |
+| `mean_travel_distance`, `mean_execution_cost` | Affinity and cost-quality signals for capability-aware runtime and optimizer scenarios |
 
 ## Scenario families
 
@@ -35,6 +36,7 @@ These simulate the runtime layer over time, including releases, failures, actor 
 | `deadline_resilience_with_actor_flapping` | Deadlines | Deadline protection under temporary capacity loss |
 | `replanning_stability_under_resumable_failures` | Stability | Plan stability when assigned work fails and returns |
 | `dependency_flow_stability_under_multiphase_disruption` | Stability | Cross-phase stability when dependencies and disruption interact |
+| `capability_fragmentation_shift_gap_resilience` | Stability | Capability, demand, affinity, travel, and execution-cost behavior when specialized actors have staggered availability windows |
 
 ### Optimizer backend scenarios
 
@@ -58,7 +60,7 @@ bazel build -c opt //task_orchestrator/benchmark:runtime_strategy_benchmark
 
 ./bazel-bin/task_orchestrator/benchmark/runtime_strategy_benchmark \
   --iterations=10 \
-  --seed=20260328 \
+  --seed=20260329 \
   --markdown=task_orchestrator/benchmark/results/runtime_strategy_latest_report.md \
   --csv=task_orchestrator/benchmark/results/runtime_strategy_latest_report.csv
 ```
@@ -103,6 +105,7 @@ Run one optimizer scenario family:
 
 Use the benchmark according to the decision you are making:
 
+- Treat any non-zero `constraint_violation_rate` as a correctness failure before comparing throughput or latency.
 - Choose a scheduler strategy by looking first at `completion_ratio`, `deadline_miss_rate`, and `mean_assignment_churn`, then use latency as a tiebreaker.
 - Choose an optimizer backend by matching the scenario goal to the quality metrics that matter most for that workflow.
 - Treat `mean_latency_ns` as a budget signal, not the only winner criterion. A solver that is faster but misses deadlines or violates cost intent is usually the wrong production choice.
@@ -111,11 +114,13 @@ Generated reports are written under [task_orchestrator/benchmark/results](/home/
 
 ## Current sample observations
 
-From the latest seeded runs in this repository:
+From the latest checked-in seeded reports in this repository:
 
-- `PriorityOnly` was strongest in the release-contention throughput scenario.
+- `FIFO` was strongest in the balanced release-wave runtime throughput scenario, while `EDF` was strongest in the chaotic release-storm variant.
 - `EDF` was strongest in the deadline-resilience scenario.
-- `SJF` was strongest in the failure-replanning and multi-phase stability scenarios.
+- `SJF` was strongest in the failure-replanning stability scenarios.
+- `EDF` was strongest in the dependency-flow and capability-fragmentation runtime stability scenarios.
 - `indexed_branch_and_bound` won the current throughput-maximization and cost-tradeoff backend scenarios.
-- `commercial_mip[SCIP]` was the strongest choice in the precedence-heavy deadline scenario in this environment.
+- The precedence-heavy optimizer deadline scenarios are currently infeasible across all checked-in backend runs in this environment.
 - `ortools_cp_sat` participated successfully in all four backend scenarios in the optimized run and was the strongest choice in the overload-resilience scenario.
+- Capability-fragmentation optimizer scenarios currently split between `ortools_cp_sat` on staggered shift caps and `indexed_branch_and_bound` on severe fragmentation.

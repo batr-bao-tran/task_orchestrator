@@ -1,6 +1,7 @@
 #ifndef TASK_ORCHESTRATOR__TASK_ORCHESTRATOR_INCLUDE_TASK_ORCHESTRATOR_CORE__ACTOR_HPP_
 #define TASK_ORCHESTRATOR__TASK_ORCHESTRATOR_INCLUDE_TASK_ORCHESTRATOR_CORE__ACTOR_HPP_
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "utils/types.hpp"
@@ -9,10 +10,13 @@ namespace task_orchestrator {
 
 struct Actor {
   ActorId id;
+  std::string type{};
   /** Max concurrent tasks (or "slots") this actor can run. */
   int capacity = 1;
   /** Uptime windows; assignments must fall inside one of these. */
   std::vector<AvailabilityWindow> availability_windows;
+  std::vector<std::string> capabilities{};
+  double execution_cost_per_unit = 0.0;
 
   /** Current number of tasks assigned and not yet completed. */
   int current_load = 0;

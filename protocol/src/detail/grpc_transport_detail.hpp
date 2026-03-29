@@ -175,20 +175,20 @@ class AsyncClientStreamState final {
   }
 
   void set_cancel_callback(std::function<void()> cancel_callback) {
-    bool invoke_immediately = false;
+    std::function<void()> callback_to_invoke;
     {
       std::scoped_lock lock(mutex_);
       if (closed_) {
         return;
       }
       if (cancel_requested_) {
-        invoke_immediately = true;
+        callback_to_invoke = std::move(cancel_callback);
       } else {
         cancel_callback_ = std::move(cancel_callback);
       }
     }
-    if (invoke_immediately && cancel_callback) {
-      cancel_callback();
+    if (callback_to_invoke) {
+      callback_to_invoke();
     }
   }
 

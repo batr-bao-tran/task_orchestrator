@@ -21,7 +21,7 @@ TEST(PriorityOnlyStrategyTest, OrdersByPriorityOnly) {
       .id = "P3", .phase_id = "ph", .sub_process_ids = {}, .estimated_duration = 1, .priority = 5, .deadline = 50});
 
   to::ActorRegistry reg;
-  reg.add(to::Actor{.id = "A1", .capacity = 3, .availability_windows = {{.start = 0, .end = 1000}}, .current_load = 0});
+  reg.add(to::Actor{.id = "A1", .capacity = 1, .availability_windows = {{.start = 0, .end = 1000}}, .current_load = 0});
   to::WorkflowState state;
   to::PriorityOnlyStrategy prio;
   auto result = to::Scheduler::plan(w, state, reg, 0, &prio);
