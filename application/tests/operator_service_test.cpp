@@ -131,6 +131,15 @@ void seed_workflow(const std::shared_ptr<tcp::store::SqliteWorkflowStore>& store
   store->write_audit_entry(workflow_id, make_audit_entry(1, "seed", "seeded workflow"));
 }
 
+void seed_workflow_with_single_plan(const std::shared_ptr<tcp::store::SqliteWorkflowStore>& store,
+                                    std::string_view workflow_id) {
+  const tp::WorkflowRecord workflow = make_workflow_record(workflow_id);
+  store->upsert_workflow(workflow);
+  store->write_event(workflow_id, make_event_record(1, workflow_id, "workflow stored"));
+  store->write_plan_version(workflow_id, make_plan_version(1, workflow_id));
+  store->write_audit_entry(workflow_id, make_audit_entry(1, "seed", "seeded workflow"));
+}
+
 class FakeRuntimeService final : public tp::WorkflowRuntimeService {
  public:
   tp::RuntimeApiResponse submit_workflow(const tp::SubmitWorkflowRequest& request) override {
@@ -418,6 +427,79 @@ TEST(OperatorServiceTest, DashboardHandlesEmptySelectionAndHistoryFailures) {
   std::filesystem::remove_all(database_path.parent_path());
 }
 
+TEST(OperatorServiceTest, DashboardUpdateRefreshesMatchingWorkflowAndPropagatesHistoryErrors) {
+  const std::filesystem::path database_path = make_temp_db("dashboard_update");
+  std::filesystem::remove_all(database_path.parent_path());
+
+  auto store = std::make_shared<tcp::store::SqliteWorkflowStore>(database_path, "boot-dashboard-update");
+  seed_workflow(store, "wf-1");
+  auto registry = tcp::integration::make_in_memory_connector_registry();
+  auto update_feed = tcp::service::make_in_memory_workflow_update_feed();
+  FakeRuntimeService runtime;
+  FakeControlPlaneService control_plane(store);
+  toa::OperatorService service(runtime, control_plane, store, registry, update_feed);
+
+  tp::GetOperatorDashboardRequest request;
+  request.set_selected_workflow_id("wf-1");
+  request.set_workflow_page_size(5);
+  request.set_max_events(3);
+  request.set_max_plan_versions(3);
+  request.set_max_audit_entries(2);
+
+  tp::OperatorDashboardNotification notification;
+  notification.event_id = 7;
+  notification.workflow_id = "wf-1";
+
+  const tp::OperatorDashboardUpdate update = service.get_dashboard_update(request, notification);
+  EXPECT_TRUE(update.ok());
+  EXPECT_EQ("wf-1", update.selected_workflow_id());
+  EXPECT_EQ(1, control_plane.history_calls);
+  EXPECT_EQ(1, control_plane.diff_calls);
+  EXPECT_EQ("wf-1", update.selected_workflow().workflow().summary().workflow_id());
+  EXPECT_EQ(2, update.selected_workflow().plan_versions_size());
+
+  notification.workflow_id = "wf-2";
+  const tp::OperatorDashboardUpdate other_workflow_update = service.get_dashboard_update(request, notification);
+  EXPECT_TRUE(other_workflow_update.ok());
+  EXPECT_EQ(1, control_plane.history_calls);
+  EXPECT_EQ(1, control_plane.diff_calls);
+  EXPECT_FALSE(other_workflow_update.has_selected_workflow());
+
+  control_plane.force_history_error = true;
+  notification.workflow_id = "wf-1";
+  const tp::OperatorDashboardUpdate failed_update = service.get_dashboard_update(request, notification);
+  EXPECT_FALSE(failed_update.ok());
+  EXPECT_EQ("history unavailable", failed_update.error_message());
+
+  std::filesystem::remove_all(database_path.parent_path());
+}
+
+TEST(OperatorServiceTest, DashboardSkipsPlanDiffWhenOnlyOnePlanVersionExists) {
+  const std::filesystem::path database_path = make_temp_db("single_plan");
+  std::filesystem::remove_all(database_path.parent_path());
+
+  auto store = std::make_shared<tcp::store::SqliteWorkflowStore>(database_path, "boot-single-plan");
+  seed_workflow_with_single_plan(store, "wf-1");
+  auto registry = tcp::integration::make_in_memory_connector_registry();
+  auto update_feed = tcp::service::make_in_memory_workflow_update_feed();
+  FakeRuntimeService runtime;
+  FakeControlPlaneService control_plane(store);
+  toa::OperatorService service(runtime, control_plane, store, registry, update_feed);
+
+  tp::GetOperatorDashboardRequest request;
+  request.set_selected_workflow_id("wf-1");
+  const tp::GetOperatorDashboardResponse dashboard = service.get_dashboard(request);
+
+  EXPECT_TRUE(dashboard.ok());
+  EXPECT_EQ("wf-1", dashboard.selected_workflow_id());
+  EXPECT_EQ(1, dashboard.selected_workflow().plan_versions_size());
+  EXPECT_TRUE(dashboard.selected_plan_diff().ok());
+  EXPECT_EQ(1, control_plane.history_calls);
+  EXPECT_EQ(0, control_plane.diff_calls);
+
+  std::filesystem::remove_all(database_path.parent_path());
+}
+
 TEST(OperatorServiceTest, WorkflowAndTaskMutationsForwardRuntimeRequestsAndWriteAuditEntries) {
   const std::filesystem::path database_path = make_temp_db("mutations");
   std::filesystem::remove_all(database_path.parent_path());
@@ -482,14 +564,66 @@ TEST(OperatorServiceTest, WorkflowAndTaskMutationsForwardRuntimeRequestsAndWrite
   tp::DeleteOperatorTaskRequest delete_task_request;
   delete_task_request.set_workflow_id("wf-1");
   delete_task_request.set_task_id("pick-1");
+  delete_task_request.set_idempotency_key("idem-delete");
   const tp::OperatorMutationResponse delete_task_response = service.delete_task(delete_task_request);
   EXPECT_TRUE(delete_task_response.ok());
   EXPECT_EQ(0, runtime.last_submit_request.config().tasks_size());
+  ASSERT_TRUE(runtime.last_submit_request.has_idempotency_key());
+  EXPECT_EQ("idem-delete", runtime.last_submit_request.idempotency_key());
 
   tp::DeleteOperatorTaskRequest missing_task_request;
   missing_task_request.set_workflow_id("wf-1");
   missing_task_request.set_task_id("missing");
   EXPECT_FALSE(service.delete_task(missing_task_request).ok());
+
+  std::filesystem::remove_all(database_path.parent_path());
+}
+
+TEST(OperatorServiceTest, ValidationErrorsAndMissingFeedsReturnStructuredResponses) {
+  const std::filesystem::path database_path = make_temp_db("validation");
+  std::filesystem::remove_all(database_path.parent_path());
+
+  auto store = std::make_shared<tcp::store::SqliteWorkflowStore>(database_path, "boot-validation");
+  auto registry = tcp::integration::make_in_memory_connector_registry();
+  FakeRuntimeService runtime;
+  FakeControlPlaneService control_plane(store);
+  toa::OperatorService service(runtime, control_plane, store, registry, {});
+
+  EXPECT_EQ(0U, service.latest_dashboard_event_id());
+  EXPECT_FALSE(service.wait_for_dashboard_update(0, std::chrono::milliseconds(1)).has_value());
+
+  tp::UpsertOperatorTaskRequest missing_task_id_request;
+  missing_task_id_request.set_workflow_id("wf-1");
+  const tp::OperatorMutationResponse missing_task_id_response = service.upsert_task(missing_task_id_request);
+  EXPECT_FALSE(missing_task_id_response.ok());
+  EXPECT_EQ("task.id is required.", missing_task_id_response.error_message());
+
+  tp::UpsertOperatorTaskRequest missing_workflow_request;
+  missing_workflow_request.set_workflow_id("wf-1");
+  missing_workflow_request.mutable_task()->set_id("pick-1");
+  const tp::OperatorMutationResponse missing_workflow_response = service.upsert_task(missing_workflow_request);
+  EXPECT_FALSE(missing_workflow_response.ok());
+  EXPECT_EQ("Workflow record not found.", missing_workflow_response.error_message());
+
+  tp::DeleteOperatorTaskRequest missing_workflow_id_request;
+  const tp::OperatorMutationResponse missing_workflow_id_response = service.delete_task(missing_workflow_id_request);
+  EXPECT_FALSE(missing_workflow_id_response.ok());
+  EXPECT_EQ("workflow_id is required.", missing_workflow_id_response.error_message());
+
+  tp::DeleteOperatorTaskRequest missing_task_id_delete_request;
+  missing_task_id_delete_request.set_workflow_id("wf-1");
+  const tp::OperatorMutationResponse missing_task_id_delete_response =
+      service.delete_task(missing_task_id_delete_request);
+  EXPECT_FALSE(missing_task_id_delete_response.ok());
+  EXPECT_EQ("task_id is required.", missing_task_id_delete_response.error_message());
+
+  tp::DeleteOperatorTaskRequest missing_delete_workflow_request;
+  missing_delete_workflow_request.set_workflow_id("wf-1");
+  missing_delete_workflow_request.set_task_id("pick-1");
+  const tp::OperatorMutationResponse missing_delete_workflow_response =
+      service.delete_task(missing_delete_workflow_request);
+  EXPECT_FALSE(missing_delete_workflow_response.ok());
+  EXPECT_EQ("Workflow record not found.", missing_delete_workflow_response.error_message());
 
   std::filesystem::remove_all(database_path.parent_path());
 }

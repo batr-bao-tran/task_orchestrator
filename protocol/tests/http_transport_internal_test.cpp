@@ -316,6 +316,9 @@ TEST(HttpTransportInternalTest, ProtobufHelpersAndRouteExtractionAreDeterministi
 TEST(HttpTransportInternalTest, QueryDecodingAndOperatorRouteHelpersRejectInvalidShapes) {
   EXPECT_EQ("lane blocked/wave", detail::decode_query_component("lane+blocked%2Fwave"));
   EXPECT_EQ("A", detail::decode_query_component("%41"));
+  const std::string lower_hex = detail::decode_query_component("%af");
+  ASSERT_EQ(1U, lower_hex.size());
+  EXPECT_EQ(0xAF, static_cast<unsigned char>(lower_hex.front()));
   EXPECT_EQ("%ZZ", detail::decode_query_component("%ZZ"));
 
   EXPECT_EQ("wf-1", detail::query_value("selected_workflow_id=wf-1", "selected_workflow_id").value());
@@ -335,6 +338,7 @@ TEST(HttpTransportInternalTest, QueryDecodingAndOperatorRouteHelpersRejectInvali
   EXPECT_EQ("wf-live", detail::extract_operator_task_workflow_id("/v1/operator/workflows/wf-live/tasks").value());
   EXPECT_FALSE(detail::extract_operator_task_workflow_id("/v1/operator/workflows//tasks").has_value());
   EXPECT_FALSE(detail::extract_operator_task_workflow_id("/v1/operator/workflows/wf-live/tasks/extra").has_value());
+  EXPECT_FALSE(detail::extract_operator_task_workflow_id("/v1/operator/workflows/wf/live/tasks").has_value());
 
   const auto delete_route =
       detail::extract_operator_task_delete_route("/v1/operator/workflows/wf-live/tasks/pick-1:delete");
@@ -498,6 +502,38 @@ TEST(HttpTransportInternalTest, PeerNameAndHttpErrorHelpersAreDeterministic) {
   ASSERT_TRUE(parsed_error.ParseFromString(http_error.body()));
   EXPECT_FALSE(parsed_error.ok());
   EXPECT_EQ("bad request", parsed_error.error_message());
+}
+
+TEST(HttpTransportInternalTest, JsonSerializationSanitizesInvalidUtf8AndErrorHelpersReturnStructuredResponses) {
+  GetOperatorDashboardResponse invalid_dashboard;
+  invalid_dashboard.set_ok(true);
+  invalid_dashboard.set_selected_workflow_id(std::string(1, static_cast<char>(0xFF)));
+
+  std::string body;
+  std::string content_type;
+  std::string error_message;
+  EXPECT_TRUE(detail::serialize_json_message(invalid_dashboard, &body, &content_type, &error_message));
+  EXPECT_EQ(std::string(detail::kJsonContentType), content_type);
+  EXPECT_TRUE(error_message.empty());
+  EXPECT_EQ(R"({"ok":true,"selectedWorkflowId":" "})", body);
+
+  const auto http_response = detail::make_http_message_response(http::status::ok, invalid_dashboard, 11, true, true);
+  EXPECT_EQ(http::status::ok, http_response.result());
+  EXPECT_EQ(std::string(detail::kJsonContentType), std::string(http_response[http::field::content_type]));
+  EXPECT_EQ(R"({"ok":true,"selectedWorkflowId":" "})", http_response.body());
+
+  const auto sse_payload = detail::make_operator_dashboard_sse_payload(invalid_dashboard, 42);
+  EXPECT_NE(sse_payload.find("id: 42"), std::string::npos);
+  EXPECT_NE(sse_payload.find("event: dashboard"), std::string::npos);
+  EXPECT_NE(sse_payload.find(R"("selectedWorkflowId":" ")"), std::string::npos);
+
+  const auto error_dashboard = detail::make_error_message<GetOperatorDashboardResponse>("operator unavailable");
+  EXPECT_FALSE(error_dashboard.ok());
+  EXPECT_EQ("operator unavailable", error_dashboard.error_message());
+
+  const auto transport_error = detail::make_transport_error_response("transport failed");
+  EXPECT_FALSE(transport_error.ok());
+  EXPECT_EQ("transport failed", transport_error.error_message());
 }
 
 TEST(HttpTransportInternalTest, TlsPeerNameAndTrustHelpersSupportFallbackAndSystemRoots) {
@@ -706,6 +742,14 @@ TEST(HttpTransportInternalTest, OperatorRoutesRejectUnavailableMalformedAndMisma
   EXPECT_FALSE(parsed_mutation_error.ok());
   EXPECT_NE(parsed_mutation_error.error_message().find("workflow_id in path does not match"), std::string::npos);
 
+  http::request<http::string_body> invalid_task_json_request(
+      http::verb::post, "/v1/operator/workflows/wf-live/tasks", 11);
+  invalid_task_json_request.body() = R"({"workflowId":)";
+  invalid_task_json_request.prepare_payload();
+  const auto invalid_task_json_response =
+      detail::handle_http_request(runtime_service, &operator_service, false, invalid_task_json_request);
+  EXPECT_EQ(http::status::bad_request, invalid_task_json_response.result());
+
   http::request<http::string_body> invalid_delete_request(
       http::verb::post, "/v1/operator/workflows/wf-live/tasks/pick-9:delete", 11);
   invalid_delete_request.body() = R"({"workflowId":)";
@@ -730,6 +774,14 @@ TEST(HttpTransportInternalTest, OperatorRoutesRejectUnavailableMalformedAndMisma
       detail::handle_http_request(runtime_service, &operator_service, false, invalid_pause_request);
   EXPECT_EQ(http::status::bad_request, invalid_pause_response.result());
   EXPECT_EQ(0, operator_service.pause_calls);
+
+  http::request<http::string_body> invalid_pause_json_request(
+      http::verb::post, "/v1/operator/workflows/wf-live:pause", 11);
+  invalid_pause_json_request.body() = R"({"workflowId":)";
+  invalid_pause_json_request.prepare_payload();
+  const auto invalid_pause_json_response =
+      detail::handle_http_request(runtime_service, &operator_service, false, invalid_pause_json_request);
+  EXPECT_EQ(http::status::bad_request, invalid_pause_json_response.result());
 
   http::request<http::string_body> invalid_resume_request(
       http::verb::post, "/v1/operator/workflows/wf-live:resume", 11);
@@ -757,6 +809,14 @@ TEST(HttpTransportInternalTest, OperatorRoutesRejectUnavailableMalformedAndMisma
       detail::handle_http_request(runtime_service, &operator_service, false, invalid_intervention_request);
   EXPECT_EQ(http::status::bad_request, invalid_intervention_response.result());
   EXPECT_EQ(0, operator_service.intervention_calls);
+
+  http::request<http::string_body> invalid_intervention_json_request(
+      http::verb::post, "/v1/operator/workflows/wf-live:manualIntervention", 11);
+  invalid_intervention_json_request.body() = R"({"workflowId":)";
+  invalid_intervention_json_request.prepare_payload();
+  const auto invalid_intervention_json_response =
+      detail::handle_http_request(runtime_service, &operator_service, false, invalid_intervention_json_request);
+  EXPECT_EQ(http::status::bad_request, invalid_intervention_json_response.result());
 
   http::request<http::string_body> unknown_operator_route(
       http::verb::post, "/v1/operator/workflows/wf-live:unknown", 11);
@@ -997,6 +1057,94 @@ TEST(HttpTransportInternalTest, HttpServerStreamsOperatorDashboardSnapshotsOverS
   EXPECT_EQ(1, operator_service.dashboard_update_calls);
   EXPECT_EQ("wf-live", operator_service.last_dashboard_update_request.selected_workflow_id());
   EXPECT_EQ("wf-live", operator_service.last_dashboard_notification.workflow_id);
+
+  socket.close();
+  server.stop();
+}
+
+TEST(HttpTransportInternalTest, HttpServerRejectsSseWhenOperatorLiveUpdatesAreUnavailable) {
+  CapturingWorkflowRuntimeService runtime_service;
+
+  BeastHttpWorkflowApiServer server(runtime_service,
+                                    tp::HttpEndpointOptions{
+                                        .bind_address = tp::kDefaultLoopbackAddress,
+                                        .port = 0,
+                                        .use_tls = false,
+                                        .tls = {},
+                                        .io_threads = tp::kDefaultIoThreads,
+                                        .max_body_bytes = tp::kDefaultMaxHttpBodyBytes,
+                                    },
+                                    make_default_tls_credential_provider());
+  server.start();
+  ASSERT_TRUE(server.running());
+
+  asio::io_context io_context;
+  tcp::resolver resolver(io_context);
+  tcp::socket socket(io_context);
+  beast::error_code error_code;
+  const auto resolved =
+      resolver.resolve(tp::kDefaultLoopbackAddress, std::to_string(port_from_endpoint(server.endpoint())), error_code);
+  ASSERT_FALSE(error_code);
+  asio::connect(socket, resolved, error_code);
+  ASSERT_FALSE(error_code);
+
+  http::request<http::string_body> request(http::verb::get, "/v1/operator/dashboard:stream", 11);
+  request.set(http::field::host, tp::kDefaultLoopbackAddress);
+  request.set(http::field::accept, "text/event-stream");
+  request.prepare_payload();
+  http::write(socket, request, error_code);
+  ASSERT_FALSE(error_code);
+
+  const std::string response =
+      read_socket_until(socket, "Operator live updates are unavailable", std::chrono::seconds(1));
+  EXPECT_NE(response.find("503 Service Unavailable"), std::string::npos);
+  EXPECT_NE(response.find("Operator live updates are unavailable"), std::string::npos);
+
+  socket.close();
+  server.stop();
+}
+
+TEST(HttpTransportInternalTest, HttpServerStreamsKeepaliveCommentsWhenNoDashboardUpdatesArrive) {
+  CapturingWorkflowRuntimeService runtime_service;
+  CapturingWorkflowOperatorService operator_service;
+
+  BeastHttpWorkflowApiServer server(runtime_service,
+                                    tp::HttpEndpointOptions{
+                                        .bind_address = tp::kDefaultLoopbackAddress,
+                                        .port = 0,
+                                        .use_tls = false,
+                                        .tls = {},
+                                        .io_threads = tp::kDefaultIoThreads,
+                                        .max_body_bytes = tp::kDefaultMaxHttpBodyBytes,
+                                    },
+                                    make_default_tls_credential_provider(),
+                                    &operator_service,
+                                    &operator_service);
+  server.start();
+  ASSERT_TRUE(server.running());
+
+  asio::io_context io_context;
+  tcp::resolver resolver(io_context);
+  tcp::socket socket(io_context);
+  beast::error_code error_code;
+  const auto resolved =
+      resolver.resolve(tp::kDefaultLoopbackAddress, std::to_string(port_from_endpoint(server.endpoint())), error_code);
+  ASSERT_FALSE(error_code);
+  asio::connect(socket, resolved, error_code);
+  ASSERT_FALSE(error_code);
+
+  http::request<http::string_body> request(http::verb::get, "/v1/operator/dashboard:stream", 11);
+  request.set(http::field::host, tp::kDefaultLoopbackAddress);
+  request.set(http::field::accept, "text/event-stream");
+  request.prepare_payload();
+  http::write(socket, request, error_code);
+  ASSERT_FALSE(error_code);
+
+  const std::string initial = read_socket_until(socket, "event: dashboard", std::chrono::seconds(1));
+  EXPECT_NE(initial.find("event: dashboard"), std::string::npos);
+
+  const std::string heartbeat = read_socket_until(socket, ": keepalive", std::chrono::seconds(3));
+  EXPECT_NE(heartbeat.find(": keepalive"), std::string::npos);
 
   socket.close();
   server.stop();

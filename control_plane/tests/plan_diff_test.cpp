@@ -44,4 +44,20 @@ TEST(PlanDiffTest, DetectsAddedRemovedAndChangedAssignments) {
   EXPECT_EQ("robot_3", diff.changed_assignments(0).after().actor_id());
 }
 
+TEST(PlanDiffTest, InvalidResponsesAreTreatedAsEmptyAssignmentSets) {
+  tp::RuntimeApiResponse invalid_before;
+  invalid_before.set_ok(false);
+  invalid_before.set_error_message("load failed");
+
+  const tp::RuntimeApiResponse after = make_response({
+      {"pick", "robot_3", 1, 6},
+  });
+
+  const tp::WorkflowPlanDiff diff = tcs::diff_plan_versions(invalid_before, after);
+  ASSERT_EQ(1, diff.added_assignments_size());
+  EXPECT_EQ("pick", diff.added_assignments(0).task_id());
+  EXPECT_EQ(0, diff.removed_assignments_size());
+  EXPECT_EQ(0, diff.changed_assignments_size());
+}
+
 }  // namespace

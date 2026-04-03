@@ -31,6 +31,7 @@
 #include "runtime_service/in_memory_runtime_service.hpp"
 #include "task_orchestrator/optimizer/optimizer.hpp"
 #include "utils/logger.hpp"
+#include "utils/task_executor.hpp"
 
 namespace task_orchestrator::app {
 
@@ -602,11 +603,12 @@ int run_service_mode(const ApplicationLaunchConfig& launch_config,
 
   RuntimeServiceBundle service_bundle;
   std::unique_ptr<app::operator_api::OperatorService> operator_service;
+  std::shared_ptr<control_plane::service::WorkflowUpdateFeed> workflow_update_feed;
   if (launch_config.control_plane.configured()) {
     auto workflow_store =
         std::make_shared<control_plane::store::SqliteWorkflowStore>(launch_config.control_plane.database_path);
     auto connector_registry = control_plane::integration::make_in_memory_connector_registry();
-    auto workflow_update_feed = control_plane::service::make_in_memory_workflow_update_feed();
+    workflow_update_feed = control_plane::service::make_in_memory_workflow_update_feed();
     control_plane::service::EventStorageManagementService event_storage_management(
         workflow_store, launch_config.control_plane.prune_after_days);
     if (launch_config.control_plane.pruning_enabled()) {
@@ -704,12 +706,16 @@ int run_service_mode(const ApplicationLaunchConfig& launch_config,
     logger->info("Interrupt received. Stopping runtime service.");
   }
 
+  if (workflow_update_feed) {
+    workflow_update_feed->shutdown();
+  }
   if (grpc_server) {
     grpc_server->stop();
   }
   if (http_server) {
     http_server->stop();
   }
+  get_shared_task_executor().stop();
   return exit_code;
 }
 

@@ -5,6 +5,11 @@ application:
       mode: api_key
       expected_credential: local-dev-key
       require_secure_transport: false
+    control_plane:
+      enabled: true
+      database_path: .task-orchestrator/control-plane/control_plane.sqlite3
+      recover_on_start: true
+      prune_after_days: 30
     bootstrap_request:
       kind: workflow_yaml
       path: ../workflow_configs/service_bootstrap_rich.yaml
@@ -15,7 +20,7 @@ application:
       http:
         enabled: true
         bind_address: 127.0.0.1
-        port: 0
+        port: 8080
         io_threads: 4
         max_body_bytes: 2097152
       grpc:

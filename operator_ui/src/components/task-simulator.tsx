@@ -42,7 +42,7 @@ function makeDraftFromTask(task: WorkflowTask): TaskEditorDraft {
   };
 }
 
-function mergeTaskDraft(existingTask: WorkflowTask | undefined, draft: TaskEditorDraft): WorkflowTask {
+function mergeTaskDraft(existingTask: WorkflowTask | undefined, draft: TaskEditorDraft, requiredCapabilities: string[], dependencyTaskIds: string[]): WorkflowTask {
   const requestedTimeMs = fromDatetimeLocalValue(draft.requestedAt);
   const deadlineMs = fromDatetimeLocalValue(draft.deadlineAt);
 
@@ -66,8 +66,8 @@ function mergeTaskDraft(existingTask: WorkflowTask | undefined, draft: TaskEdito
     allowedActorTypes: existingTask?.allowedActorTypes ?? [],
     allowedActorIds: existingTask?.allowedActorIds ?? [],
     preferredActorIds: draft.preferredActorId.length > 0 ? [draft.preferredActorId] : [],
-    requiredCapabilities: existingTask?.requiredCapabilities ?? [],
-    dependencyTaskIds: existingTask?.dependencyTaskIds ?? [],
+    requiredCapabilities,
+    dependencyTaskIds,
     mutuallyExclusiveTaskIds: existingTask?.mutuallyExclusiveTaskIds ?? [],
     actorDistances: existingTask?.actorDistances ?? [],
     tardinessCostPerUnit: existingTask?.tardinessCostPerUnit ?? 0,
@@ -76,13 +76,39 @@ function mergeTaskDraft(existingTask: WorkflowTask | undefined, draft: TaskEdito
   };
 }
 
+function collectCapabilities(detail: WorkflowDetail): string[] {
+  const capabilitySet = new Set<string>();
+  for (const actor of detail.actors) {
+    for (const capability of actor.capabilities) {
+      capabilitySet.add(capability);
+    }
+  }
+  return [...capabilitySet].sort();
+}
+
+function validateDeadlineAfterStart(requestedAt: string, deadlineAt: string): string | undefined {
+  if (requestedAt.length === 0 || deadlineAt.length === 0) {
+    return undefined;
+  }
+  const requestedMs = fromDatetimeLocalValue(requestedAt);
+  const deadlineMs = fromDatetimeLocalValue(deadlineAt);
+  if (deadlineMs > 0 && requestedMs > 0 && deadlineMs <= requestedMs) {
+    return "Deadline must be after the requested start time.";
+  }
+  return undefined;
+}
+
 export function TaskSimulator({ detail, busy, onSaveTask, onDeleteTask }: TaskSimulatorProps) {
   const [editingTaskId, setEditingTaskId] = useState<string>();
   const [draft, setDraft] = useState<TaskEditorDraft>(makeEmptyDraft);
+  const [requiredCapabilities, setRequiredCapabilities] = useState<string[]>([]);
+  const [dependencyTaskIds, setDependencyTaskIds] = useState<string[]>([]);
 
   useEffect(() => {
     setEditingTaskId(undefined);
     setDraft(makeEmptyDraft());
+    setRequiredCapabilities([]);
+    setDependencyTaskIds([]);
   }, [detail?.summary.workflowId]);
 
   if (detail === undefined) {
@@ -90,6 +116,8 @@ export function TaskSimulator({ detail, busy, onSaveTask, onDeleteTask }: TaskSi
   }
 
   const editingTask = detail.tasks.find((task) => task.id === editingTaskId);
+  const availableCapabilities = collectCapabilities(detail);
+  const deadlineError = validateDeadlineAfterStart(draft.requestedAt, draft.deadlineAt);
 
   return (
     <section className="panel simulator-panel">
@@ -106,6 +134,8 @@ export function TaskSimulator({ detail, busy, onSaveTask, onDeleteTask }: TaskSi
             onClick={() => {
               setEditingTaskId(undefined);
               setDraft(makeEmptyDraft());
+              setRequiredCapabilities([]);
+              setDependencyTaskIds([]);
             }}
             type="button"
           >
@@ -124,6 +154,7 @@ export function TaskSimulator({ detail, busy, onSaveTask, onDeleteTask }: TaskSi
                 <strong>{task.id}</strong>
                 <p>
                   {task.requestedAt} • {task.durationMinutes} min • priority {task.priority}
+                  {task.requiredCapabilities.length > 0 ? ` • requires ${task.requiredCapabilities.join(", ")}` : ""}
                 </p>
               </div>
               <div className="task-row-actions">
@@ -133,6 +164,8 @@ export function TaskSimulator({ detail, busy, onSaveTask, onDeleteTask }: TaskSi
                   onClick={() => {
                     setEditingTaskId(task.id);
                     setDraft(makeDraftFromTask(task));
+                    setRequiredCapabilities(task.requiredCapabilities);
+                    setDependencyTaskIds(task.dependencyTaskIds);
                   }}
                   type="button"
                 >
@@ -158,7 +191,10 @@ export function TaskSimulator({ detail, busy, onSaveTask, onDeleteTask }: TaskSi
         className="task-form"
         onSubmit={(event) => {
           event.preventDefault();
-          const task = mergeTaskDraft(editingTask, draft);
+          if (deadlineError) {
+            return;
+          }
+          const task = mergeTaskDraft(editingTask, draft, requiredCapabilities, dependencyTaskIds);
           void onSaveTask({
             workflowId: detail.summary.workflowId,
             task,
@@ -166,6 +202,8 @@ export function TaskSimulator({ detail, busy, onSaveTask, onDeleteTask }: TaskSi
           }).then(() => {
             setEditingTaskId(undefined);
             setDraft(makeEmptyDraft());
+            setRequiredCapabilities([]);
+            setDependencyTaskIds([]);
           });
         }}
       >
@@ -196,17 +234,20 @@ export function TaskSimulator({ detail, busy, onSaveTask, onDeleteTask }: TaskSi
             />
           </label>
 
-          <label className="field">
-            <span>Deadline</span>
-            <input
-              disabled={busy}
-              onChange={(event) => {
-                setDraft((current) => ({ ...current, deadlineAt: event.target.value }));
-              }}
-              type="datetime-local"
-              value={draft.deadlineAt}
-            />
-          </label>
+          <div className="field">
+            <label>
+              <span>Deadline</span>
+              <input
+                disabled={busy}
+                onChange={(event) => {
+                  setDraft((current) => ({ ...current, deadlineAt: event.target.value }));
+                }}
+                type="datetime-local"
+                value={draft.deadlineAt}
+              />
+            </label>
+            {deadlineError ? <p className="field-error">{deadlineError}</p> : null}
+          </div>
 
           <label className="field">
             <span>Duration (minutes)</span>
@@ -221,37 +262,94 @@ export function TaskSimulator({ detail, busy, onSaveTask, onDeleteTask }: TaskSi
             />
           </label>
 
-          <label className="field">
-            <span>Priority</span>
-            <input
-              disabled={busy}
-              min={0}
-              onChange={(event) => {
-                setDraft((current) => ({ ...current, priority: Number(event.target.value) || 0 }));
-              }}
-              type="number"
-              value={draft.priority}
-            />
-          </label>
+          <div className="field">
+            <label>
+              <span>Priority</span>
+              <input
+                disabled={busy}
+                min={0}
+                onChange={(event) => {
+                  setDraft((current) => ({ ...current, priority: Number(event.target.value) || 0 }));
+                }}
+                type="number"
+                value={draft.priority}
+              />
+            </label>
+            <p className="field-hint">Higher values are scheduled first.</p>
+          </div>
 
           <label className="field">
             <span>Preferred actor</span>
-            <input
+            <select
               disabled={busy}
-              list="actor-suggestions"
               onChange={(event) => {
                 setDraft((current) => ({ ...current, preferredActorId: event.target.value }));
               }}
-              placeholder="robot_4"
               value={draft.preferredActorId}
-            />
-            <datalist id="actor-suggestions">
+            >
+              <option value="">No preference</option>
               {detail.actors.map((actor) => (
-                <option key={actor.id} value={actor.id} />
+                <option key={actor.id} value={actor.id}>
+                  {actor.id} ({actor.type}{actor.capabilities.length > 0 ? `: ${actor.capabilities.join(", ")}` : ""})
+                </option>
               ))}
-            </datalist>
+            </select>
           </label>
         </div>
+
+        {availableCapabilities.length > 0 ? (
+          <fieldset className="fieldset">
+            <legend>Required capabilities</legend>
+            <span className="field-hint">The assigned actor must have all selected capabilities.</span>
+            <div className="checkbox-row">
+              {availableCapabilities.map((capability) => (
+                <label className="checkbox-field" key={capability}>
+                  <input
+                    checked={requiredCapabilities.includes(capability)}
+                    disabled={busy}
+                    onChange={(event) => {
+                      if (event.target.checked) {
+                        setRequiredCapabilities((current) => [...current, capability]);
+                      } else {
+                        setRequiredCapabilities((current) => current.filter((c) => c !== capability));
+                      }
+                    }}
+                    type="checkbox"
+                  />
+                  {capability}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
+
+        {detail.tasks.length > 0 ? (
+          <fieldset className="fieldset">
+            <legend>Dependencies</legend>
+            <span className="field-hint">This task will not start until all selected tasks have finished.</span>
+            <div className="checkbox-row">
+              {detail.tasks
+                .filter((task) => task.id !== draft.id)
+                .map((task) => (
+                  <label className="checkbox-field" key={task.id}>
+                    <input
+                      checked={dependencyTaskIds.includes(task.id)}
+                      disabled={busy}
+                      onChange={(event) => {
+                        if (event.target.checked) {
+                          setDependencyTaskIds((current) => [...current, task.id]);
+                        } else {
+                          setDependencyTaskIds((current) => current.filter((id) => id !== task.id));
+                        }
+                      }}
+                      type="checkbox"
+                    />
+                    {task.id}
+                  </label>
+                ))}
+            </div>
+          </fieldset>
+        ) : null}
 
         <div className="checkbox-row">
           <label className="checkbox-field">
@@ -287,7 +385,7 @@ export function TaskSimulator({ detail, busy, onSaveTask, onDeleteTask }: TaskSi
               setDraft((current) => ({ ...current, note: event.target.value }));
             }}
             placeholder="Explain why this order changed so the next operator understands the context."
-            rows={3}
+            rows={2}
             value={draft.note}
           />
         </label>
@@ -295,7 +393,7 @@ export function TaskSimulator({ detail, busy, onSaveTask, onDeleteTask }: TaskSi
         <div className="toolbar-actions">
           <button
             className="action-button action-button--primary"
-            disabled={busy || draft.id.trim().length === 0 || draft.requestedAt.length === 0}
+            disabled={busy || draft.id.trim().length === 0 || draft.requestedAt.length === 0 || deadlineError !== undefined}
             type="submit"
           >
             {editingTask ? "Update order" : "Insert order"}
@@ -306,6 +404,8 @@ export function TaskSimulator({ detail, busy, onSaveTask, onDeleteTask }: TaskSi
             onClick={() => {
               setEditingTaskId(undefined);
               setDraft(makeEmptyDraft());
+              setRequiredCapabilities([]);
+              setDependencyTaskIds([]);
             }}
             type="button"
           >

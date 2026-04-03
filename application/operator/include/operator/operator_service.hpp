@@ -50,9 +50,8 @@ class OperatorService final : public protocol::WorkflowOperatorService, public p
   void populate_workflow_summaries(google::protobuf::RepeatedPtrField<protocol::WorkflowSummary>* workflows,
                                    std::string_view workflow_query,
                                    std::int32_t workflow_page_size) const;
-  std::string resolve_selected_workflow_id(
-      std::string selected_workflow_id,
-      const google::protobuf::RepeatedPtrField<protocol::WorkflowSummary>& workflows) const;
+  static std::string resolve_selected_workflow_id(
+      std::string selected_workflow_id, const google::protobuf::RepeatedPtrField<protocol::WorkflowSummary>& workflows);
   bool populate_selected_workflow(std::string_view workflow_id,
                                   std::int32_t max_events,
                                   std::int32_t max_plan_versions,
@@ -61,7 +60,7 @@ class OperatorService final : public protocol::WorkflowOperatorService, public p
                                   protocol::GetPlanDiffResponse* plan_diff_response,
                                   std::string* error_message) const;
   protocol::GetOperatorDashboardResponse build_dashboard(std::string selected_workflow_id,
-                                                         std::string workflow_query,
+                                                         std::string_view workflow_query,
                                                          const protocol::pb::ClientAuthContext& auth_context,
                                                          std::int32_t workflow_page_size,
                                                          std::int32_t max_events,

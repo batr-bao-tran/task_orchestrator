@@ -314,6 +314,28 @@ TEST(GrpcTransportInternalTest, AsyncClientStreamStateInvokesLateCancellationReg
   EXPECT_EQ(1, cancellation_calls);
 }
 
+TEST(GrpcTransportInternalTest, TransportErrorEventsAndClosedStreamsBehavePredictably) {
+  const auto transport_error = detail::make_transport_error_response("grpc failed");
+  EXPECT_FALSE(transport_error.ok());
+  EXPECT_EQ("grpc failed", transport_error.error_message());
+
+  const auto error_event = detail::make_transport_error_event("workflow_demo", "stream failed");
+  EXPECT_EQ(pb::WORKFLOW_EVENT_TYPE_REQUEST_REJECTED, error_event.type());
+  EXPECT_EQ("workflow_demo", error_event.workflow_id());
+  EXPECT_EQ("stream failed", error_event.detail());
+  ASSERT_TRUE(error_event.has_response());
+  EXPECT_FALSE(error_event.response().ok());
+  EXPECT_EQ("stream failed", error_event.response().error_message());
+
+  auto stream_state = std::make_shared<detail::AsyncClientStreamState>();
+  stream_state->close();
+  WorkflowEvent dropped_event;
+  dropped_event.set_type(pb::WORKFLOW_EVENT_TYPE_TASK_PLANNED);
+  dropped_event.set_workflow_id("workflow_demo");
+  stream_state->push_event(std::move(dropped_event));
+  EXPECT_FALSE(stream_state->wait_next().has_value());
+}
+
 TEST(GrpcTransportInternalTest, StreamGeneratorCancelsWhenConsumerStopsEarly) {
   auto stream_state = std::make_shared<detail::AsyncClientStreamState>();
   int cancellation_calls = 0;

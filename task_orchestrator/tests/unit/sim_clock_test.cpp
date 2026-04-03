@@ -82,4 +82,12 @@ TEST(SimClockTest, ClearEventsDropsPendingWork) {
   clock.clear_events();
   EXPECT_FALSE(clock.has_pending_events());
 }
+
+TEST(SimClockTest, RunUntilDoesNotMoveBackwardInTime) {
+  to::SimClock clock;
+  clock.set_time(10);
+
+  EXPECT_EQ(10, clock.run_until(5));
+  EXPECT_EQ(10, clock.current_time());
+}
 }  // namespace

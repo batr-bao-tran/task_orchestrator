@@ -178,6 +178,14 @@ cc_library(
 )
 
 cc_library(
+    name = "grpc_transport_impl_source",
+    testonly = True,
+    includes = ["."],
+    textual_hdrs = ["src/grpc_transport.cpp"],
+    visibility = ["//protocol/tests:__pkg__"],
+)
+
+cc_library(
     name = "grpc_transport",
     srcs = [
         "src/detail/grpc_transport_detail.hpp",

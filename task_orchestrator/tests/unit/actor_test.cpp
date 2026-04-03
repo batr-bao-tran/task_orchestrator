@@ -43,4 +43,13 @@ TEST(ActorTest, NextAvailableStartFullCapacity) {
   a.availability_windows = {{.start = 0, .end = 1000}};
   EXPECT_FALSE(a.next_available_start(0, 10).has_value());
 }
+
+TEST(ActorTest, NextAvailableStartReturnsNulloptWhenNoWindowFits) {
+  to::Actor actor;
+  actor.capacity = 1;
+  actor.current_load = 0;
+  actor.availability_windows = {{.start = 0, .end = 5}};
+
+  EXPECT_FALSE(actor.next_available_start(4, 2).has_value());
+}
 }  // namespace

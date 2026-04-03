@@ -1,9 +1,11 @@
+import { AuditTrail, EventTimeline } from "./components/workflow-detail";
 import { IntegrationPanel } from "./components/integration-panel";
 import { TaskSimulator } from "./components/task-simulator";
 import { WorkflowControls } from "./components/workflow-controls";
 import { WorkflowDetail } from "./components/workflow-detail";
 import { WorkflowScenarioForm } from "./components/workflow-scenario-form";
 import { WorkflowTable } from "./components/workflow-table";
+import { WorkspaceTabs } from "./components/workspace-tabs";
 import { useOperatorDashboard } from "./hooks/use-operator-dashboard";
 
 export function App() {
@@ -15,6 +17,7 @@ export function App() {
     mutating,
     errorMessage,
     infoMessage,
+    connectionInterrupted,
     modeLabel,
     setSelectedWorkflowId,
     setSearchQuery,
@@ -33,7 +36,7 @@ export function App() {
       <section className="hero">
         <div>
           <p className="eyebrow">Task Orchestrator</p>
-          <h1>Operate the durable control plane in real time.</h1>
+          <h1>Manage your workflows in real time.</h1>
           <p className="hero-copy">
             Inspect live workflow history, pause or recover plans, and simulate incoming orders by inserting,
             rescheduling, or deleting tasks directly from the operator console.
@@ -82,45 +85,79 @@ export function App() {
       </section>
 
       {errorMessage ? (
-        <section className="status-banner status-banner--error" role="alert">
-          {errorMessage}
+        <section
+          className={`status-banner ${connectionInterrupted ? "status-banner--critical" : "status-banner--error"}`}
+          role="alert"
+        >
+          {connectionInterrupted ? (
+            <>
+              <p className="status-banner__title">Live updates unavailable</p>
+              <p className="status-banner__body">{errorMessage}</p>
+            </>
+          ) : (
+            errorMessage
+          )}
         </section>
       ) : null}
 
       {infoMessage ? <section className="status-banner status-banner--info">{infoMessage}</section> : null}
 
-      <section className="layout">
-        <WorkflowTable
-          onSelect={setSelectedWorkflowId}
-          selectedWorkflowId={dashboard?.selectedWorkflowId ?? selectedWorkflowId}
-          workflows={dashboard?.workflows ?? []}
-        />
+      <WorkspaceTabs>
+        {(activeTab) => (
+          <>
+            {activeTab !== "integrations" ? (
+              <section className="layout">
+                <WorkflowTable
+                  onSelect={setSelectedWorkflowId}
+                  selectedWorkflowId={dashboard?.selectedWorkflowId ?? selectedWorkflowId}
+                  workflows={dashboard?.workflows ?? []}
+                />
+                <div className="workspace-content">
+                  {activeTab === "workflows" ? (
+                    <WorkflowDetail detail={dashboard?.selectedWorkflow} />
+                  ) : null}
 
-        <div className="workspace">
-          <WorkflowScenarioForm
-            busy={mutating}
-            detail={dashboard?.selectedWorkflow}
-            onCreateWorkflow={upsertWorkflow}
-          />
-          <WorkflowDetail detail={dashboard?.selectedWorkflow} />
-          <WorkflowControls
-            busy={mutating}
-            detail={dashboard?.selectedWorkflow}
-            onCancel={cancelWorkflow}
-            onManualIntervention={applyManualIntervention}
-            onPause={pauseWorkflow}
-            onResume={resumeWorkflow}
-          />
-          <TaskSimulator
-            busy={mutating}
-            detail={dashboard?.selectedWorkflow}
-            onDeleteTask={deleteTask}
-            onSaveTask={upsertTask}
-          />
-        </div>
-      </section>
+                  {activeTab === "operate" ? (
+                    <WorkflowControls
+                      busy={mutating}
+                      detail={dashboard?.selectedWorkflow}
+                      onCancel={cancelWorkflow}
+                      onManualIntervention={applyManualIntervention}
+                      onPause={pauseWorkflow}
+                      onResume={resumeWorkflow}
+                    />
+                  ) : null}
 
-      <IntegrationPanel connectors={dashboard?.connectors ?? []} />
+                  {activeTab === "simulate" ? (
+                    <>
+                      <WorkflowScenarioForm
+                        busy={mutating}
+                        detail={dashboard?.selectedWorkflow}
+                        onCreateWorkflow={upsertWorkflow}
+                      />
+                      <TaskSimulator
+                        busy={mutating}
+                        detail={dashboard?.selectedWorkflow}
+                        onDeleteTask={deleteTask}
+                        onSaveTask={upsertTask}
+                      />
+                    </>
+                  ) : null}
+
+                  {activeTab === "history" ? (
+                    <section className="history-grid">
+                      <EventTimeline detail={dashboard?.selectedWorkflow} />
+                      <AuditTrail detail={dashboard?.selectedWorkflow} />
+                    </section>
+                  ) : null}
+                </div>
+              </section>
+            ) : (
+              <IntegrationPanel connectors={dashboard?.connectors ?? []} />
+            )}
+          </>
+        )}
+      </WorkspaceTabs>
     </main>
   );
 }

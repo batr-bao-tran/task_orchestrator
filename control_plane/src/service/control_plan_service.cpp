@@ -281,6 +281,7 @@ protocol::WorkflowEventStream ControlPlanService::stream_reorchestrate(protocol:
     co_return;
   }
 
+  std::optional<protocol::RuntimeApiResponse> replay_failure_response;
   {
     std::scoped_lock lock(hydrated_mutex_);
     if (!hydrated_workflows_.contains(workflow_id)) {
@@ -290,14 +291,19 @@ protocol::WorkflowEventStream ControlPlanService::stream_reorchestrate(protocol:
       replay_request.set_replace_existing(true);
       const protocol::RuntimeApiResponse replay_response = runtime_service_->submit_workflow(replay_request);
       if (!replay_response.ok()) {
-        co_yield make_response_event(protocol::pb::WORKFLOW_EVENT_TYPE_REQUEST_REJECTED,
-                                     workflow_id,
-                                     replay_response,
-                                     replay_response.error_message());
-        co_return;
+        replay_failure_response = replay_response;
+      } else {
+        hydrated_workflows_.insert(workflow_id);
       }
-      hydrated_workflows_.insert(workflow_id);
     }
+  }
+  if (replay_failure_response.has_value()) {
+    const protocol::RuntimeApiResponse& replay_response = *replay_failure_response;
+    co_yield make_response_event(protocol::pb::WORKFLOW_EVENT_TYPE_REQUEST_REJECTED,
+                                 workflow_id,
+                                 replay_response,
+                                 replay_response.error_message());
+    co_return;
   }
 
   const std::string idempotency_key = request.has_idempotency_key() ? request.idempotency_key() : std::string{};

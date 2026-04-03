@@ -47,7 +47,9 @@ inline ActorConfig to_app_actor(const pb::ActorConfig& actor) {
     app_actor.capacity = actor.capacity();
   }
   app_actor.windows.reserve(static_cast<std::size_t>(actor.windows_size()));
-  std::ranges::transform(actor.windows(), std::back_inserter(app_actor.windows), to_app_window);
+  std::ranges::transform(actor.windows(),
+                         std::back_inserter(app_actor.windows),
+                         [](const pb::AvailabilityWindow& window) { return to_app_window(window); });
   app_actor.capabilities.assign(actor.capabilities().begin(), actor.capabilities().end());
   if (actor.has_execution_cost_per_unit()) {
     app_actor.execution_cost_per_unit = actor.execution_cost_per_unit();
@@ -140,9 +142,13 @@ inline WorkflowConfig to_app_workflow(const pb::WorkflowConfig& workflow) {
     }
   }
   app_workflow.actors.reserve(static_cast<std::size_t>(workflow.actors_size()));
-  std::ranges::transform(workflow.actors(), std::back_inserter(app_workflow.actors), to_app_actor);
+  std::ranges::transform(workflow.actors(), std::back_inserter(app_workflow.actors), [](const pb::ActorConfig& actor) {
+    return to_app_actor(actor);
+  });
   app_workflow.tasks.reserve(static_cast<std::size_t>(workflow.tasks_size()));
-  std::ranges::transform(workflow.tasks(), std::back_inserter(app_workflow.tasks), to_app_task);
+  std::ranges::transform(workflow.tasks(), std::back_inserter(app_workflow.tasks), [](const pb::TaskConfig& task) {
+    return to_app_task(task);
+  });
   return app_workflow;
 }
 
