@@ -178,10 +178,9 @@ describe("useOperatorDashboard", () => {
 
     await waitFor(() => {
       expect(result.current.modeLabel).toBe("mock");
+      expect(result.current.infoMessage).toBe("Live operator API unavailable, switched to mock mode.");
+      expect(result.current.dashboard?.selectedWorkflowId).toBe("warehouse-morning-wave");
     });
-    expect(result.current.modeLabel).toBe("mock");
-    expect(result.current.infoMessage).toBe("Live operator API unavailable, switched to mock mode.");
-    expect(result.current.dashboard?.selectedWorkflowId).toBe("warehouse-morning-wave");
   });
 
   it("subscribes to live updates and refreshes on focus without polling", async () => {
@@ -237,7 +236,9 @@ describe("useOperatorDashboard", () => {
     act(() => {
       eventSources.at(-1)?.onerror?.(new Event("error"));
     });
-    expect(result.current.infoMessage).toBe("Live updates reconnecting...");
+    expect(result.current.connectionInterrupted).toBe(true);
+    expect(result.current.errorMessage).toBe("We can't reach live updates right now. Please refresh and try again in a moment.");
+    expect(result.current.infoMessage).toBeUndefined();
 
     await act(async () => {
       window.dispatchEvent(new Event("focus"));
@@ -279,6 +280,41 @@ describe("useOperatorDashboard", () => {
       expect(result.current.loading).toBe(false);
     });
     expect(result.current.modeLabel).toBe("live");
+    expect(result.current.connectionInterrupted).toBe(true);
     expect(result.current.errorMessage).toBe("Live dashboard stream disconnected.");
+  });
+
+  it("surfaces thrown mutation failures in live mode", async () => {
+    const config = {
+      modePreference: "live" as const,
+      apiBaseUrl: "http://control-plane",
+    };
+    const eventSources: FakeEventSource[] = [];
+    vi.stubGlobal(
+      "EventSource",
+      class extends FakeEventSource {
+        constructor(url: string) {
+          super(url);
+          eventSources.push(this);
+        }
+      },
+    );
+    const fetchMock = vi.fn<typeof fetch>().mockRejectedValueOnce("boom");
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useOperatorDashboard(config));
+
+    await act(async () => {
+      eventSources.at(-1)?.emit("dashboard", JSON.stringify(buildOperatorDashboardPayload()));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await result.current.pauseWorkflow({
+        workflowId: "wf-live",
+      });
+    });
+    expect(result.current.errorMessage).toBe("Operator mutation failed.");
+    expect(result.current.mutating).toBe(false);
   });
 });

@@ -18,6 +18,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -65,6 +67,8 @@ struct BeastHttpWorkflowApiServer::Impl {
   int bound_port = 0;
   std::string startup_error_message;
   std::shared_ptr<spdlog::logger> logger = get_logger(LogLayer::Application);
+  std::mutex active_sockets_mutex;
+  std::set<tcp::socket*> active_sockets;
 
   Impl(WorkflowRuntimeService& runtime_service,
        HttpEndpointOptions endpoint_options,
@@ -176,6 +180,8 @@ struct BeastHttpWorkflowApiServer::Impl {
       accept_thread.join();
     }
     if (worker_pool) {
+      worker_pool->stop();
+      close_active_sockets();
       worker_pool->join();
       worker_pool.reset();
     }
@@ -186,6 +192,25 @@ struct BeastHttpWorkflowApiServer::Impl {
   [[nodiscard]] std::string endpoint() const {
     return std::string(options.use_tls ? "https://" : "http://") + options.bind_address + ":" +
            std::to_string(bound_port == 0 ? options.port : bound_port);
+  }
+
+  void register_socket(tcp::socket* socket) {
+    std::scoped_lock lock(active_sockets_mutex);
+    active_sockets.insert(socket);
+  }
+
+  void unregister_socket(tcp::socket* socket) {
+    std::scoped_lock lock(active_sockets_mutex);
+    active_sockets.erase(socket);
+  }
+
+  void close_active_sockets() {
+    std::scoped_lock lock(active_sockets_mutex);
+    for (auto* socket : active_sockets) {
+      beast::error_code ec;
+      [[maybe_unused]] const auto shutdown_result = socket->shutdown(tcp::socket::shutdown_both, ec);
+      [[maybe_unused]] const auto close_result = socket->close(ec);
+    }
   }
 
   void accept_loop() {
@@ -209,6 +234,9 @@ struct BeastHttpWorkflowApiServer::Impl {
   }
 
   void handle_connection(tcp::socket socket) {
+    if (!is_running.load()) {
+      return;
+    }
     if (options.use_tls) {
       handle_tls_connection(std::move(socket));
       return;
@@ -311,7 +339,9 @@ struct BeastHttpWorkflowApiServer::Impl {
   }
 
   void handle_plain_connection(tcp::socket socket) {
+    register_socket(&socket);
     process_http_session(socket);
+    unregister_socket(&socket);
 
     beast::error_code error_code;
     [[maybe_unused]] const auto shutdown_result = socket.shutdown(tcp::socket::shutdown_both, error_code);
@@ -322,15 +352,18 @@ struct BeastHttpWorkflowApiServer::Impl {
 
   void handle_tls_connection(tcp::socket socket) {
     TlsServerStream tls_stream(std::move(socket), *tls_context);
+    register_socket(&tls_stream.next_layer());
 
     beast::error_code error_code;
     tls_stream.handshake(ssl::stream_base::server, error_code);
     if (error_code) {
+      unregister_socket(&tls_stream.next_layer());
       logger->warn("HTTP TLS handshake failed: {}", error_code.message());
       return;
     }
 
     process_http_session(tls_stream);
+    unregister_socket(&tls_stream.next_layer());
 
     tls_stream.shutdown(error_code);
     if (error_code && !ignorable_tls_shutdown_error(error_code)) {

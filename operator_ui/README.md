@@ -66,12 +66,43 @@ http://localhost:5173
 
 ## Run With The C++ Backend
 
-1. Start the Task Orchestrator server with the control plane enabled.
-2. Ensure the HTTP server is reachable from the browser, commonly on `http://127.0.0.1:8080`.
-3. Start the UI with `VITE_OPERATOR_DATA_MODE=live npm run dev`.
-4. Open the browser app and confirm the mode badge shows `live mode`.
+The backend must have the **control plane enabled** and serve HTTP on a known port. Without the control plane the operator API returns 503 and the UI falls back to mock mode.
 
-The UI uses one aggregated dashboard request for the main operator screen so it does not need to fan out across multiple browser calls on each refresh.
+**1. Start the backend** using a config with `control_plane` and a fixed HTTP port:
+
+```bash
+# From the repo root
+bazel run //application:run_config -- "$PWD/application/config/examples/serve_with_control_plane.yaml"
+```
+
+This config enables the control plane (SQLite-backed), HTTP on port 8080, and gRPC on port 9090. You can also add a `control_plane` section to any existing config:
+
+```yaml
+application:
+  service:
+    control_plane:
+      enabled: true
+      database_path: .task-orchestrator/control-plane/control_plane.sqlite3
+    interfaces:
+      http:
+        port: 8080   # must be a fixed port, not 0
+```
+
+**2. Start the frontend:**
+
+```bash
+cd operator_ui
+npm install
+npm run dev
+```
+
+The Vite dev server proxies `/v1/...` requests to `http://127.0.0.1:8080` by default. If the backend uses a different port, override with:
+
+```bash
+VITE_OPERATOR_API_BASE_URL=http://127.0.0.1:<port> npm run dev
+```
+
+**3. Verify:** open `http://localhost:5173` and confirm the mode badge shows **live mode**.
 
 ## Build For Production
 

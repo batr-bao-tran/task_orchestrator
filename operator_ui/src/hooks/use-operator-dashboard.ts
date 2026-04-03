@@ -27,6 +27,7 @@ interface UseOperatorDashboardState {
   mutating: boolean;
   errorMessage?: string;
   infoMessage?: string;
+  connectionInterrupted: boolean;
   modeLabel: "live" | "mock";
   setSelectedWorkflowId: (workflowId: string) => void;
   setSearchQuery: (query: string) => void;
@@ -58,6 +59,7 @@ export function useOperatorDashboard(config: OperatorClientConfig = readOperator
   const [mutating, setMutating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string>();
   const [infoMessage, setInfoMessage] = useState<string>();
+  const [connectionInterrupted, setConnectionInterrupted] = useState(false);
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const mountedRef = useRef(true);
   const hasLiveSnapshotRef = useRef(false);
@@ -82,6 +84,7 @@ export function useOperatorDashboard(config: OperatorClientConfig = readOperator
     fallbackInProgressRef.current = false;
     startTransition(() => {
       setDashboard(nextDashboard);
+      setConnectionInterrupted(false);
       setErrorMessage(undefined);
       setLoading(false);
     });
@@ -111,6 +114,7 @@ export function useOperatorDashboard(config: OperatorClientConfig = readOperator
           selectedWorkflow: update.dashboard.selectedWorkflow ?? currentDashboard.selectedWorkflow,
         };
       });
+      setConnectionInterrupted(false);
       setErrorMessage(undefined);
       setLoading(false);
     });
@@ -130,6 +134,7 @@ export function useOperatorDashboard(config: OperatorClientConfig = readOperator
     hasLiveSnapshotRef.current = false;
     startTransition(() => {
       setDashboard(fallbackDashboard);
+      setConnectionInterrupted(false);
       setErrorMessage(undefined);
       setInfoMessage("Live operator API unavailable, switched to mock mode.");
       setLoading(false);
@@ -138,6 +143,7 @@ export function useOperatorDashboard(config: OperatorClientConfig = readOperator
 
   const loadDashboard = useEffectEvent(async () => {
     setLoading(true);
+    setConnectionInterrupted(false);
     setErrorMessage(undefined);
 
     try {
@@ -181,6 +187,7 @@ export function useOperatorDashboard(config: OperatorClientConfig = readOperator
     hasLiveSnapshotRef.current = false;
     fallbackInProgressRef.current = false;
     setLoading(true);
+    setConnectionInterrupted(false);
     setErrorMessage(undefined);
 
     const subscription = liveClient.subscribeDashboard(makeQuery(selectedWorkflowId, deferredSearchQuery), {
@@ -192,6 +199,8 @@ export function useOperatorDashboard(config: OperatorClientConfig = readOperator
       },
       onOpen() {
         if (isMounted()) {
+          setConnectionInterrupted(false);
+          setErrorMessage(undefined);
           setInfoMessage("Live updates connected.");
         }
       },
@@ -205,12 +214,16 @@ export function useOperatorDashboard(config: OperatorClientConfig = readOperator
             void fallbackToMock();
             return;
           }
+          setConnectionInterrupted(true);
           setErrorMessage(error.message);
           setLoading(false);
           return;
         }
 
-        setInfoMessage("Live updates reconnecting...");
+        setConnectionInterrupted(true);
+        setErrorMessage("We can't reach live updates right now. Please refresh and try again in a moment.");
+        setInfoMessage(undefined);
+        setLoading(false);
       },
     });
 
@@ -274,6 +287,7 @@ export function useOperatorDashboard(config: OperatorClientConfig = readOperator
     mutating,
     errorMessage,
     infoMessage,
+    connectionInterrupted,
     modeLabel: activeMode,
     setSelectedWorkflowId(workflowId) {
       setSelectedWorkflowIdState(workflowId);

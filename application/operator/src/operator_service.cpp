@@ -289,8 +289,7 @@ void OperatorService::populate_workflow_summaries(
 }
 
 std::string OperatorService::resolve_selected_workflow_id(
-    std::string selected_workflow_id,
-    const google::protobuf::RepeatedPtrField<protocol::WorkflowSummary>& workflows) const {
+    std::string selected_workflow_id, const google::protobuf::RepeatedPtrField<protocol::WorkflowSummary>& workflows) {
   if (selected_workflow_id.empty() && !workflows.empty()) {
     selected_workflow_id = workflows.Get(0).workflow_id();
   }
@@ -338,7 +337,7 @@ bool OperatorService::populate_selected_workflow(std::string_view workflow_id,
 
 protocol::GetOperatorDashboardResponse OperatorService::build_dashboard(
     std::string selected_workflow_id,
-    std::string workflow_query,
+    const std::string_view workflow_query,
     const protocol::pb::ClientAuthContext& auth_context,
     const std::int32_t workflow_page_size,
     const std::int32_t max_events,

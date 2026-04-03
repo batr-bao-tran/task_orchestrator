@@ -41,8 +41,20 @@ fi
 
 coverage_summary="$(
   awk '
-    /^LF:/ { total_lines += substr($0, 4) }
-    /^LH:/ { covered_lines += substr($0, 4) }
+    /^SF:/ {
+      current_file = substr($0, 4)
+      include_file = index(current_file, "/tests/") == 0
+    }
+    /^LF:/ {
+      if (include_file) {
+        total_lines += substr($0, 4)
+      }
+    }
+    /^LH:/ {
+      if (include_file) {
+        covered_lines += substr($0, 4)
+      }
+    }
     END {
       if (total_lines == 0) {
         printf "0 0 0.00"

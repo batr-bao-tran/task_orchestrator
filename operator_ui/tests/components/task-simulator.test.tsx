@@ -3,6 +3,7 @@ import { fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TaskSimulator } from "../../src/components/task-simulator";
+import type { WorkflowTaskMutation } from "../../src/lib/types";
 import { detailWithChanges } from "../fixtures";
 
 describe("TaskSimulator", () => {
@@ -70,5 +71,52 @@ describe("TaskSimulator", () => {
 
     rerender(<TaskSimulator busy={false} detail={undefined} onDeleteTask={vi.fn()} onSaveTask={onSaveTask} />);
     expect(screen.queryByText("Orders and task schedules")).not.toBeInTheDocument();
+  });
+
+  it("validates deadlines and captures capability and dependency changes", async () => {
+    const user = userEvent.setup();
+    const onSaveTask = vi.fn().mockResolvedValue(undefined);
+
+    render(<TaskSimulator busy={false} detail={detailWithChanges} onDeleteTask={vi.fn()} onSaveTask={onSaveTask} />);
+
+    await user.click(screen.getByRole("button", { name: "New order" }));
+    await user.type(screen.getByLabelText("Task ID"), "pick-260");
+    fireEvent.change(screen.getByLabelText("Requested start"), { target: { value: "2026-03-29T12:00" } });
+    fireEvent.change(screen.getByLabelText("Deadline"), { target: { value: "2026-03-29T11:30" } });
+
+    expect(screen.getByText("Deadline must be after the requested start time.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Insert order" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Deadline"), { target: { value: "2026-03-29T13:30" } });
+    await user.selectOptions(screen.getByLabelText("Preferred actor"), "robot_1");
+    await user.click(screen.getByLabelText("scan"));
+    await user.click(screen.getByLabelText("pick-108"));
+    await user.click(screen.getByLabelText("Mandatory"));
+    await user.click(screen.getByLabelText("Preemptible"));
+    await user.click(screen.getByRole("button", { name: "Insert order" }));
+
+    const firstCall = onSaveTask.mock.calls[0]?.[0] as WorkflowTaskMutation | undefined;
+    expect(firstCall).toBeDefined();
+    expect(firstCall?.task.preferredActorIds).toEqual(["robot_1"]);
+    expect(firstCall?.task.requiredCapabilities).toEqual(["scan"]);
+    expect(firstCall?.task.dependencyTaskIds).toEqual(["pick-108"]);
+    expect(firstCall?.task.mandatory).toBe(false);
+    expect(firstCall?.task.preemptible).toBe(true);
+  });
+
+  it("shows an explicit empty state when a workflow has no tasks", () => {
+    render(
+      <TaskSimulator
+        busy={false}
+        detail={{
+          ...detailWithChanges,
+          tasks: [],
+        }}
+        onDeleteTask={vi.fn()}
+        onSaveTask={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("No tasks are currently scheduled for this workflow.")).toBeInTheDocument();
   });
 });

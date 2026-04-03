@@ -115,6 +115,62 @@ class ScopedStdinPipe final {
   bool active_ = false;
 };
 
+class ScopedIdleStdinPipe final {
+ public:
+  ScopedIdleStdinPipe() {
+    std::array<int, 2> pipe_descriptors = {-1, -1};
+    if (::pipe(pipe_descriptors.data()) != 0) {
+      return;
+    }
+
+    original_stdin_ = ::dup(STDIN_FILENO);
+    if (original_stdin_ < 0) {
+      close_descriptor(pipe_descriptors[0]);
+      close_descriptor(pipe_descriptors[1]);
+      return;
+    }
+
+    if (::dup2(pipe_descriptors[0], STDIN_FILENO) < 0) {
+      close_descriptor(pipe_descriptors[0]);
+      close_descriptor(pipe_descriptors[1]);
+      restore_stdin();
+      return;
+    }
+
+    std::cin.clear();
+    close_descriptor(pipe_descriptors[0]);
+    write_descriptor_ = pipe_descriptors[1];
+    active_ = true;
+  }
+
+  ~ScopedIdleStdinPipe() noexcept {
+    close_descriptor(write_descriptor_);
+    restore_stdin();
+    std::cin.clear();
+  }
+
+  [[nodiscard]] bool active() const noexcept { return active_; }
+
+ private:
+  static void close_descriptor(const int descriptor) noexcept {
+    if (descriptor >= 0) {
+      ::close(descriptor);
+    }
+  }
+
+  void restore_stdin() noexcept {
+    if (original_stdin_ >= 0) {
+      ::dup2(original_stdin_, STDIN_FILENO);
+      ::close(original_stdin_);
+      original_stdin_ = -1;
+    }
+  }
+
+  int original_stdin_ = -1;
+  int write_descriptor_ = -1;
+  bool active_ = false;
+};
+
 std::filesystem::path write_file(const std::filesystem::path& path, std::string_view content) {
   std::ofstream output(path, std::ios::binary);
   output << content;
@@ -725,14 +781,93 @@ TEST(ApplicationTest, RunServeModeProcessesCliCommandsAndBootstrapWorkflow) {
   EXPECT_EQ(EXIT_SUCCESS, application.run(config, temp_directory.path()));
 }
 
+TEST(ApplicationTest, RunServeModeProcessesTextBootstrapRequest) {
+  const ScopedTempDirectory temp_directory;
+  write_file(temp_directory.path() / "bootstrap.txt", workflow_text("bootstrap_text"));
+
+  const ScopedStdinPipe stdin_pipe("status\nquit\n");
+  ASSERT_TRUE(stdin_pipe.active());
+
+  const to::app::ApplicationConfig config{
+      .configured = true,
+      .mode = to::app::ApplicationMode::Serve,
+      .request = {},
+      .service =
+          {
+              .configured = true,
+              .security =
+                  {
+                      .mode = to::protocol::AuthMode::ApiKey,
+                      .expected_credential = "local-dev-key",
+                      .require_secure_transport = false,
+                  },
+              .interfaces =
+                  {
+                      .cli =
+                          {
+                              .enabled = true,
+                              .prompt = "text-bootstrap> ",
+                          },
+                      .http = {},
+                      .grpc = {},
+                  },
+              .bootstrap_request =
+                  {
+                      .kind = to::app::RequestFileKind::WorkflowText,
+                      .path = "bootstrap.txt",
+                  },
+              .bootstrap_workflow = std::nullopt,
+          },
+  };
+
+  EXPECT_EQ(EXIT_SUCCESS, to::app::Application::run(config, temp_directory.path()));
+}
+
+TEST(ApplicationTest, RunFromArgsServeModeStopsAfterCliPollingTimeoutSignalWithTextBootstrap) {
+  const ScopedTempDirectory temp_directory;
+  write_file(temp_directory.path() / "bootstrap.txt", workflow_text("bootstrap_poll"));
+  const std::filesystem::path application_config_path = write_file(temp_directory.path() / "serve_text.yaml",
+                                                                   "application:\n"
+                                                                   "  mode: serve\n"
+                                                                   "  service:\n"
+                                                                   "    security:\n"
+                                                                   "      mode: api_key\n"
+                                                                   "      expected_credential: polling-key\n"
+                                                                   "    interfaces:\n"
+                                                                   "      cli:\n"
+                                                                   "        enabled: true\n"
+                                                                   "        prompt: \"poll> \"\n"
+                                                                   "    bootstrap_request:\n"
+                                                                   "      kind: workflow_text\n"
+                                                                   "      path: bootstrap.txt\n");
+
+  const ScopedIdleStdinPipe stdin_pipe;
+  ASSERT_TRUE(stdin_pipe.active());
+
+  std::jthread signal_thread([]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    ::raise(SIGINT);
+  });
+
+  std::string executable_name = "run_config";
+  std::string config_path_string = application_config_path.string();
+  std::array<char*, 2> argv = {executable_name.data(), config_path_string.data()};
+
+  EXPECT_EQ(EXIT_SUCCESS, to::app::Application::run_from_args(static_cast<int>(argv.size()), argv.data()));
+}
+
 TEST(ApplicationTest, RunServeModeExecutesExampleServeApplicationConfig) {
   const ScopedStdinPipe stdin_pipe("status\nquit\n");
   ASSERT_TRUE(stdin_pipe.active());
 
   const std::filesystem::path application_config_path =
       runfiles_path("application/examples/application_configs/serve_http_grpc_cli.yaml");
+  auto config = to::app::load_application_config_from_file(application_config_path.c_str());
+  ASSERT_TRUE(config.configured);
+  config.service.interfaces.http.endpoint.port = 0;
 
-  EXPECT_EQ(EXIT_SUCCESS, to::app::Application::run_from_file(application_config_path.c_str()));
+  EXPECT_EQ(EXIT_SUCCESS,
+            to::app::Application::run(config, std::filesystem::absolute(application_config_path).parent_path()));
 }
 
 TEST(ApplicationTest, RunServeModeFailsWhenHttpServerCannotStart) {

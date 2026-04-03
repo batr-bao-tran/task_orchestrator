@@ -93,6 +93,50 @@ describe("operator client", () => {
     expect(dashboard.connectors[1]?.enabled).toBe(false);
   });
 
+  it("falls back to the latest historical plan version with concrete timestamps", async () => {
+    const payload = buildOperatorDashboardPayload();
+    const selectedWorkflow = payload.selectedWorkflow;
+    if (!selectedWorkflow.ok) {
+      throw new Error("Expected a selected workflow payload.");
+    }
+
+    const mutableSelectedWorkflow = selectedWorkflow as Record<string, unknown>;
+    const mutableWorkflow = (mutableSelectedWorkflow.workflow as Record<string, unknown> | undefined) ?? {};
+
+    mutableWorkflow.latestResponse = { result: { assignments: [] } };
+    mutableSelectedWorkflow.planVersions = [
+      { response: { result: { assignments: [] } } },
+      {
+        response: {
+          result: {
+            assignments: [
+              {
+                taskId: "pick-1",
+                actorId: "robot_2",
+                startTime: "1711708980000",
+                endTime: "1711709880000",
+              },
+            ],
+          },
+        },
+      },
+    ];
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(payload)));
+    const client = createLiveOperatorClient("http://control-plane", fetchMock);
+    const dashboard = await client.getDashboard({ selectedWorkflowId: "wf-live" });
+    const assignment = dashboard.selectedWorkflow?.assignments[0];
+
+    expect(assignment).toMatchObject({
+      taskId: "pick-1",
+      actorId: "robot_2",
+      startTimeMs: 1711708980000,
+      endTimeMs: 1711709880000,
+      startAt: "29 Mar, 10:43",
+      endAt: "29 Mar, 10:58",
+    });
+  });
+
   it("subscribes to the live dashboard SSE stream", () => {
     let eventSource: FakeEventSource | undefined;
     const client = createLiveOperatorClient(
@@ -160,6 +204,42 @@ describe("operator client", () => {
 
     expect(onUpdate).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: "update rejected" }));
+
+    subscription.close();
+  });
+
+  it("handles live stream parse failures and default live request errors", async () => {
+    let eventSource: FakeEventSource | undefined;
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("null", { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 503 }));
+    const client = createLiveOperatorClient(
+      "http://control-plane/",
+      fetchMock,
+      (url) => {
+        eventSource = new FakeEventSource(url);
+        return eventSource;
+      },
+    );
+    const onDashboard = vi.fn();
+    const onError = vi.fn();
+
+    const subscription = client.subscribeDashboard({}, { onDashboard, onError });
+
+    expect(eventSource?.url).toBe("http://control-plane/v1/operator/dashboard:stream");
+
+    eventSource?.emit("dashboard", "{not-json");
+    eventSource?.emit("dashboard-update", "{not-json");
+
+    expect(onDashboard).not.toHaveBeenCalled();
+    const firstError = onError.mock.calls[0]?.[0] as Error | undefined;
+    const secondError = onError.mock.calls[1]?.[0] as Error | undefined;
+    expect(firstError?.message).toContain("Expected property name");
+    expect(secondError?.message).toContain("Expected property name");
+
+    await expect(client.getDashboard({})).rejects.toThrow("Expected a JSON object from the operator API.");
+    await expect(client.getDashboard({})).rejects.toThrow("Operator API request failed with status 503.");
 
     subscription.close();
   });
@@ -287,6 +367,139 @@ describe("operator client", () => {
       triggerReorchestration: false,
     });
     expect(mutationResult.errorMessage).toBe("manual rejected");
+  });
+
+  it("serializes intervention overrides and mock-mode edge cases", async () => {
+    const liveFetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify(buildOperatorMutationPayload())));
+    const liveClient = createLiveOperatorClient("http://control-plane", liveFetchMock);
+
+    await liveClient.applyManualIntervention({
+      workflowId: "wf-live",
+      note: "manual",
+      actor: "alice",
+      taskOverrides: [
+        {
+          taskId: "pick-1",
+          completed: true,
+          requestedTime: 1711709000000,
+          deadline: 1711710000000,
+          priority: 7,
+          pinnedActorId: "robot_3",
+        },
+        {
+          taskId: "pick-2",
+          completed: false,
+        },
+      ],
+      actorOverrides: [
+        {
+          actorId: "robot_1",
+          unavailable: true,
+          capacity: 3,
+        },
+        {
+          actorId: "robot_2",
+          unavailable: false,
+        },
+      ],
+      triggerReorchestration: false,
+    });
+
+    expect(JSON.parse(readRequestBody(liveFetchMock, 0))).toEqual({
+      workflowId: "wf-live",
+      note: "manual",
+      actor: "alice",
+      taskOverrides: [
+        {
+          taskId: "pick-1",
+          completed: true,
+          requestedTime: "1711709000000",
+          deadline: "1711710000000",
+          priority: "7",
+          pinnedActorId: "robot_3",
+        },
+        {
+          taskId: "pick-2",
+          completed: false,
+        },
+      ],
+      actorOverrides: [
+        {
+          actorId: "robot_1",
+          unavailable: true,
+          capacity: "3",
+        },
+        {
+          actorId: "robot_2",
+          unavailable: false,
+        },
+      ],
+      triggerReorchestration: false,
+    });
+
+    const mockClient = createMockOperatorClient();
+
+    const lastErrorFiltered = await mockClient.getDashboard({ workflowQuery: "plan version mismatch" });
+    expect(lastErrorFiltered.workflows.map((workflow) => workflow.workflowId)).toEqual(["shift-capacity-breach"]);
+
+    const clearedSelection = await mockClient.getDashboard({ selectedWorkflowId: "" });
+    expect(clearedSelection.selectedWorkflowId).toBe("");
+    expect(clearedSelection.selectedWorkflow).toBeUndefined();
+
+    const updatedTask = await mockClient.upsertTask({
+      workflowId: "warehouse-morning-wave",
+      task: {
+        ...(lastErrorFiltered.selectedWorkflow?.tasks[0] ?? {
+          id: "pick-108",
+          requestedTimeMs: 1711708920000,
+          requestedAt: "",
+          durationMs: 900000,
+          durationMinutes: 15,
+          latestStartTimeMs: 0,
+          deadlineMs: 0,
+          priority: 1,
+          mandatory: true,
+          preemptible: false,
+          allowedActorTypes: [],
+          allowedActorIds: [],
+          preferredActorIds: [],
+          requiredCapabilities: [],
+          dependencyTaskIds: [],
+          mutuallyExclusiveTaskIds: [],
+          actorDistances: [],
+          tardinessCostPerUnit: 0,
+          earlyStartBonus: 0,
+          phaseDurations: [],
+        }),
+        id: "pick-108",
+        preferredActorIds: [],
+      },
+    });
+    expect(updatedTask.dashboard.selectedWorkflow?.assignments.find((assignment) => assignment.taskId === "pick-108")?.actorId).toBe(
+      "robot_1",
+    );
+    expect(updatedTask.dashboard.selectedWorkflow?.audits.at(-1)?.action).toBe("operator_update_task");
+    expect(updatedTask.dashboard.selectedWorkflow?.operatorsNote).toBe("Task pick-108 saved from mock mode.");
+
+    const updatedWorkflow = await mockClient.upsertWorkflow({
+      workflowId: "warehouse-morning-wave",
+      actors: [],
+      tasks: [],
+    });
+    expect(updatedWorkflow.dashboard.workflows.filter((workflow) => workflow.workflowId === "warehouse-morning-wave")).toHaveLength(1);
+    expect(updatedWorkflow.dashboard.selectedWorkflow?.events.at(-1)?.detail).toBe(
+      "Workflow warehouse-morning-wave stored without tasks yet.",
+    );
+    expect(updatedWorkflow.dashboard.selectedWorkflow?.operatorsNote).toBe("Workflow scenario saved from mock mode.");
+
+    const deleteMissingTask = await mockClient.deleteTask({
+      workflowId: "warehouse-morning-wave",
+      taskId: "missing-task",
+    });
+    expect(deleteMissingTask.dashboard.selectedWorkflow?.planDiff).toEqual([]);
+    expect(deleteMissingTask.dashboard.selectedWorkflow?.operatorsNote).toBe("Task missing-task deleted from mock mode.");
   });
 
   it("supports search, selection, task mutation, lifecycle updates, and interventions in mock mode", async () => {

@@ -146,18 +146,24 @@ export function WorkflowScenarioForm({ detail, busy, onCreateWorkflow }: Workflo
           Clone the current task schedule into the new workflow
         </label>
 
-        <label className="field">
-          <span>Scenario note</span>
-          <textarea
-            disabled={busy}
-            onChange={(event) => {
-              setNote(event.target.value);
-            }}
-            placeholder="Describe the condition you want to simulate, such as a new wave, a delayed shift, or a dock outage."
-            rows={3}
-            value={note}
-          />
-        </label>
+        <div className="field">
+          <label>
+            <span>Scenario note</span>
+            <textarea
+              disabled={busy}
+              onChange={(event) => {
+                setNote(event.target.value);
+              }}
+              placeholder="Optional audit note for the team, e.g. 'Cloned morning wave to test a tighter deadline on pick-108'."
+              rows={2}
+              value={note}
+            />
+          </label>
+          <p className="field-hint">
+            This note is saved to the audit trail. To change scheduling constraints, use the task editor below after
+            creating the workflow.
+          </p>
+        </div>
 
         <div className="toolbar-actions">
           <button

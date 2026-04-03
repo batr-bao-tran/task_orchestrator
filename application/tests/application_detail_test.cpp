@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "runtime_service/in_memory_runtime_service.hpp"
+#include "runtime_service/src/in_memory_runtime_service_detail.hpp"
 #include "task_orchestrator/optimizer/model.hpp"
 
 namespace {
@@ -327,6 +328,22 @@ to::protocol::WorkflowEventStream make_event_stream_without_response() {
   co_yield accepted;
 }
 
+to::protocol::WorkflowEventStream make_runtime_service_response_stream(
+    const to::protocol::RuntimeApiResponse& response) {
+  to::protocol::WorkflowEvent accepted;
+  accepted.set_workflow_id("runtime_detail");
+  accepted.set_type(to::protocol::pb::WORKFLOW_EVENT_TYPE_WORKFLOW_ACCEPTED);
+  accepted.set_detail("accepted");
+  co_yield accepted;
+
+  to::protocol::WorkflowEvent finished;
+  finished.set_workflow_id("runtime_detail");
+  finished.set_type(to::protocol::pb::WORKFLOW_EVENT_TYPE_RUN_FINISHED);
+  finished.set_detail("done");
+  *finished.mutable_response() = response;
+  co_yield finished;
+}
+
 TEST(ApplicationDetailTest, ContentAndPathHelpersHandleWhitespaceFilesAndStdin) {
   const ScopedTempDirectory temp_directory;
   const std::filesystem::path file_path = write_file(temp_directory.path() / "workflow.txt", "hello world");
@@ -573,6 +590,121 @@ TEST(ApplicationDetailTest, WorkflowLoadingAndCommandHelpersHandleErrorsAndSucce
       to::app::detail::handle_cli_command("unknown", temp_directory.path(), runtime_service, {}, endpoints, logger));
   EXPECT_FALSE(
       to::app::detail::handle_cli_command("exit", temp_directory.path(), runtime_service, {}, endpoints, logger));
+}
+
+TEST(ApplicationDetailTest, RuntimeServiceDetailHelpersConvertWorkflowResponsesAndEvents) {
+  namespace pb = to::protocol::pb;
+
+  pb::WorkflowConfig workflow;
+  workflow.set_id("runtime_detail");
+  workflow.mutable_optimization()->set_backend("indexed_exact");
+  workflow.mutable_optimization()->set_time_limit_ms(250);
+  workflow.mutable_optimization()->set_relative_gap_limit(0.1);
+  workflow.mutable_optimization()->set_num_search_workers(2);
+  workflow.mutable_optimization()->set_allow_partial_plan(false);
+  workflow.mutable_optimization()->mutable_objective()->set_priority_weight(7);
+
+  auto* actor = workflow.add_actors();
+  actor->set_id("robot_1");
+  actor->set_type("robot");
+  actor->set_capacity(2);
+  actor->add_capabilities("scan");
+  actor->set_execution_cost_per_unit(1.5);
+  actor->add_windows()->set_start(0);
+  actor->mutable_windows(0)->set_end(50);
+
+  auto* task = workflow.add_tasks();
+  task->set_id("pick");
+  task->set_requested_time(10);
+  task->set_duration(5);
+  task->set_latest_start_time(12);
+  task->set_deadline(30);
+  task->set_priority(9);
+  task->set_demand(2);
+  task->set_mandatory(false);
+  task->set_preemptible(true);
+  task->add_allowed_actor_types("robot");
+  task->add_allowed_actor_ids("robot_1");
+  task->add_preferred_actor_ids("robot_1");
+  task->add_required_capabilities("scan");
+  task->add_dependency_task_ids("prep");
+  task->add_mutually_exclusive_task_ids("charge");
+  auto* actor_distance = task->add_actor_distances();
+  actor_distance->set_actor_id("robot_1");
+  actor_distance->set_distance(3);
+  task->set_tardiness_cost_per_unit(1.2);
+  task->set_early_start_bonus(0.4);
+  task->add_phase_durations(2);
+  task->add_phase_durations(3);
+
+  const to::app::WorkflowConfig app_workflow = to::app::detail::to_app_workflow(workflow);
+  ASSERT_EQ(1U, app_workflow.actors.size());
+  ASSERT_EQ(1U, app_workflow.tasks.size());
+  EXPECT_EQ("runtime_detail", app_workflow.id);
+  EXPECT_EQ("indexed_exact", app_workflow.optimization.backend);
+  EXPECT_EQ(2, app_workflow.optimization.num_search_workers);
+  EXPECT_EQ(7, app_workflow.optimization.objective.priority_weight);
+  EXPECT_EQ(2, app_workflow.actors.front().capacity);
+  EXPECT_EQ(1.5, app_workflow.actors.front().execution_cost_per_unit);
+  EXPECT_EQ(std::vector<to::Duration>({2, 3}), app_workflow.tasks.front().phase_durations);
+  EXPECT_EQ(std::vector<std::string>({"prep"}), app_workflow.tasks.front().dependency_task_ids);
+  EXPECT_EQ(3, app_workflow.tasks.front().actor_distances.at("robot_1"));
+
+  to::app::WorkflowConfig dependency_workflow = app_workflow;
+  dependency_workflow.tasks.front().dependency_task_ids.emplace_back("pick");
+  to::app::detail::remove_completed_task_dependencies(dependency_workflow, "pick");
+  EXPECT_EQ(std::vector<std::string>({"prep"}), dependency_workflow.tasks.front().dependency_task_ids);
+  EXPECT_EQ(5, to::app::detail::task_duration_for_id(app_workflow, "pick"));
+  EXPECT_EQ(0, to::app::detail::task_duration_for_id(app_workflow, "missing"));
+
+  const to::app::RunResult run_result{
+      .ok = true,
+      .capacity_issue = true,
+      .assignments = {{
+          .task_id = "pick",
+          .actor_id = "robot_1",
+          .start_time = 10,
+      }},
+      .unfulfilled_task_ids = {"charge"},
+      .error_message = "capacity issue",
+  };
+
+  pb::RunResult proto_result;
+  to::app::detail::populate_proto_run_result(run_result, app_workflow, &proto_result);
+  ASSERT_EQ(1, proto_result.assignments_size());
+  EXPECT_EQ("pick", proto_result.assignments(0).task_id());
+  EXPECT_EQ(15, proto_result.assignments(0).end_time());
+  ASSERT_EQ(1, proto_result.unfulfilled_task_ids_size());
+  EXPECT_EQ("charge", proto_result.unfulfilled_task_ids(0));
+
+  const to::protocol::RuntimeApiResponse runtime_response =
+      to::app::detail::make_runtime_response(run_result, app_workflow);
+  EXPECT_TRUE(runtime_response.ok());
+  EXPECT_EQ("capacity issue", runtime_response.error_message());
+  ASSERT_EQ(1, runtime_response.result().assignments_size());
+  EXPECT_EQ(15, runtime_response.result().assignments(0).end_time());
+
+  const to::protocol::RuntimeApiResponse runtime_error = to::app::detail::make_runtime_error_response("runtime failed");
+  EXPECT_FALSE(runtime_error.ok());
+  EXPECT_EQ("runtime failed", runtime_error.error_message());
+  EXPECT_FALSE(runtime_error.result().ok());
+
+  const to::protocol::WorkflowEvent accepted =
+      to::app::detail::make_event(pb::WORKFLOW_EVENT_TYPE_WORKFLOW_ACCEPTED, "runtime_detail", "accepted");
+  EXPECT_EQ(pb::WORKFLOW_EVENT_TYPE_WORKFLOW_ACCEPTED, accepted.type());
+  EXPECT_EQ("runtime_detail", accepted.workflow_id());
+  EXPECT_EQ("accepted", accepted.detail());
+
+  const to::protocol::WorkflowEvent finished = to::app::detail::make_response_event(
+      pb::WORKFLOW_EVENT_TYPE_RUN_FINISHED, "runtime_detail", runtime_response, "done");
+  EXPECT_EQ(pb::WORKFLOW_EVENT_TYPE_RUN_FINISHED, finished.type());
+  ASSERT_TRUE(finished.has_response());
+  EXPECT_TRUE(finished.response().ok());
+
+  const to::protocol::RuntimeApiResponse consumed =
+      to::app::detail::consume_final_response(make_runtime_service_response_stream(runtime_response));
+  EXPECT_TRUE(consumed.ok());
+  EXPECT_EQ("capacity issue", consumed.error_message());
 }
 
 TEST(ApplicationDetailTest, RunModeHelpersHandleDirectErrorPaths) {

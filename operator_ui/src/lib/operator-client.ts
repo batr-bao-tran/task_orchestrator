@@ -266,6 +266,20 @@ function mapPlanDiff(value: Record<string, unknown> | undefined): PlanChange[] {
   ];
 }
 
+function extractAssignmentsFromPlanVersions(
+  planVersions: unknown[],
+): Record<string, unknown>[] {
+  for (let i = planVersions.length - 1; i >= 0; --i) {
+    const version = planVersions[i] as Record<string, unknown>;
+    const response = (version.response as Record<string, unknown> | undefined) ?? {};
+    const result = (response.result as Record<string, unknown> | undefined) ?? {};
+    if (Array.isArray(result.assignments) && result.assignments.length > 0) {
+      return result.assignments as Record<string, unknown>[];
+    }
+  }
+  return [];
+}
+
 function mapWorkflowDetail(
   selectedWorkflow: Record<string, unknown> | undefined,
   selectedPlanDiff: Record<string, unknown> | undefined,
@@ -284,15 +298,24 @@ function mapWorkflowDetail(
     : [];
   const planDiff: PlanChange[] = mapPlanDiff((selectedPlanDiff?.diff as Record<string, unknown> | undefined) ?? undefined);
 
+  let rawAssignments: Record<string, unknown>[] = Array.isArray(latestResult.assignments)
+    ? (latestResult.assignments as Record<string, unknown>[])
+    : [];
+
+  if (rawAssignments.length === 0 && Array.isArray(selectedWorkflow.planVersions)) {
+    rawAssignments = extractAssignmentsFromPlanVersions(selectedWorkflow.planVersions);
+  }
+
+  const tasks: WorkflowTask[] = Array.isArray(config.tasks)
+    ? config.tasks.map((task) => mapWorkflowTask(task as Record<string, unknown>)).sort((left, right) => left.requestedTimeMs - right.requestedTimeMs)
+    : [];
+  const mappedAssignments = rawAssignments.map((assignment) => mapAssignment(assignment));
+
   return {
     summary,
     actors: Array.isArray(config.actors) ? config.actors.map((actor) => mapWorkflowActor(actor as Record<string, unknown>)) : [],
-    tasks: Array.isArray(config.tasks)
-      ? config.tasks.map((task) => mapWorkflowTask(task as Record<string, unknown>)).sort((left, right) => left.requestedTimeMs - right.requestedTimeMs)
-      : [],
-    assignments: Array.isArray(latestResult.assignments)
-      ? latestResult.assignments.map((assignment) => mapAssignment(assignment as Record<string, unknown>))
-      : [],
+    tasks,
+    assignments: mappedAssignments,
     planDiff,
     events: Array.isArray(selectedWorkflow.events)
       ? selectedWorkflow.events.map((event) => mapEventRecord(event as Record<string, unknown>))
@@ -484,47 +507,80 @@ export function createLiveOperatorClient(
     },
 
     subscribeDashboard(query, handlers) {
-      const eventSource = eventSourceFactory(joinUrl(baseUrl, dashboardPath(query, true)));
-      const onDashboardMessage: EventListener = (event) => {
-        const messageEvent = event as MessageEvent<string>;
-        try {
-          const payload = ensureJsonResponse(JSON.parse(messageEvent.data));
-          handlers.onDashboard(mapDashboardResponse(payload, "live"));
-        } catch (error) {
-          handlers.onError?.(
-            error instanceof Error ? error : new Error("Failed to parse the operator dashboard event stream."),
-          );
-        }
-      };
-      const onDashboardUpdateMessage: EventListener = (event) => {
-        const messageEvent = event as MessageEvent<string>;
-        try {
-          const payload = ensureJsonResponse(JSON.parse(messageEvent.data));
-          if (payload.ok === false) {
-            throw new Error(stringValue(payload.errorMessage, "Failed to apply the operator dashboard live update."));
+      const url = joinUrl(baseUrl, dashboardPath(query, true));
+      let closed = false;
+      let retryDelay = 1_000;
+      let retryTimer: ReturnType<typeof setTimeout> | undefined;
+      let currentSource: EventSourceLike | undefined;
+
+      function connect() {
+        if (closed) return;
+        const eventSource = eventSourceFactory(url);
+        currentSource = eventSource;
+
+        const onDashboardMessage: EventListener = (event) => {
+          const messageEvent = event as MessageEvent<string>;
+          try {
+            retryDelay = 1_000;
+            const payload = ensureJsonResponse(JSON.parse(messageEvent.data));
+            handlers.onDashboard(mapDashboardResponse(payload, "live"));
+          } catch (error) {
+            handlers.onError?.(
+              error instanceof Error ? error : new Error("Failed to parse the operator dashboard event stream."),
+            );
           }
-          handlers.onUpdate?.(mapDashboardStreamUpdate(payload));
-        } catch (error) {
-          handlers.onError?.(
-            error instanceof Error ? error : new Error("Failed to parse the operator dashboard update stream."),
-          );
-        }
-      };
+        };
 
-      eventSource.addEventListener("dashboard", onDashboardMessage);
-      eventSource.addEventListener("dashboard-update", onDashboardUpdateMessage);
-      eventSource.onopen = () => {
-        handlers.onOpen?.();
-      };
-      eventSource.onerror = () => {
-        handlers.onError?.(new Error("Live dashboard stream disconnected."));
-      };
+        const onDashboardUpdateMessage: EventListener = (event) => {
+          const messageEvent = event as MessageEvent<string>;
+          try {
+            retryDelay = 1_000;
+            const payload = ensureJsonResponse(JSON.parse(messageEvent.data));
+            if (payload.ok === false) {
+              throw new Error(stringValue(payload.errorMessage, "Failed to apply the operator dashboard live update."));
+            }
+            handlers.onUpdate?.(mapDashboardStreamUpdate(payload));
+          } catch (error) {
+            handlers.onError?.(
+              error instanceof Error ? error : new Error("Failed to parse the operator dashboard update stream."),
+            );
+          }
+        };
 
-      return {
-        close() {
+        eventSource.addEventListener("dashboard", onDashboardMessage);
+        eventSource.addEventListener("dashboard-update", onDashboardUpdateMessage);
+
+        eventSource.onopen = () => {
+          retryDelay = 1_000;
+          handlers.onOpen?.();
+        };
+
+        eventSource.onerror = () => {
           eventSource.removeEventListener("dashboard", onDashboardMessage);
           eventSource.removeEventListener("dashboard-update", onDashboardUpdateMessage);
           eventSource.close();
+          currentSource = undefined;
+          handlers.onError?.(new Error("Live dashboard stream disconnected."));
+          if (!closed) {
+            retryTimer = setTimeout(() => {
+              connect();
+            }, retryDelay);
+            retryDelay = Math.min(retryDelay * 2, 30_000);
+          }
+        };
+      }
+
+      connect();
+
+      return {
+        close() {
+          closed = true;
+          if (retryTimer !== undefined) {
+            clearTimeout(retryTimer);
+          }
+          if (currentSource !== undefined) {
+            currentSource.close();
+          }
         },
       };
     },
@@ -660,6 +716,19 @@ export function createLiveOperatorClient(
             workflowId: command.workflowId,
             note: command.note,
             actor: command.actor,
+            taskOverrides: command.taskOverrides?.map((override) => ({
+              taskId: override.taskId,
+              completed: override.completed,
+              requestedTime: override.requestedTime !== undefined ? String(override.requestedTime) : undefined,
+              deadline: override.deadline !== undefined ? String(override.deadline) : undefined,
+              priority: override.priority !== undefined ? String(override.priority) : undefined,
+              pinnedActorId: override.pinnedActorId,
+            })),
+            actorOverrides: command.actorOverrides?.map((override) => ({
+              actorId: override.actorId,
+              unavailable: override.unavailable,
+              capacity: override.capacity !== undefined ? String(override.capacity) : undefined,
+            })),
             triggerReorchestration: command.triggerReorchestration,
           }),
         },

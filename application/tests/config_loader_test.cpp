@@ -527,6 +527,22 @@ application:
   EXPECT_FALSE(config.valid());
 }
 
+TEST(ConfigLoaderTest, ParseLaunchConfigUsesStateDirectoryAliasAndImplicitControlPlaneEnablement) {
+  const to::app::ApplicationLaunchConfig launch_config = to::app::load_launch_config_from_string(R"(
+launch:
+  interfaces:
+    cli:
+      enabled: true
+  control_plane:
+    state_directory: /var/lib/task-orchestrator/state
+)");
+
+  EXPECT_TRUE(launch_config.configured);
+  EXPECT_TRUE(launch_config.interfaces.cli.enabled);
+  EXPECT_TRUE(launch_config.control_plane.enabled);
+  EXPECT_EQ("/var/lib/task-orchestrator/state", launch_config.control_plane.database_path);
+}
+
 TEST(ConfigLoaderTest, MissingRequestKindDefaultsToNoneWhenPathIsPresent) {
   const to::app::ApplicationConfig config = to::app::load_application_config_from_string(R"(
 application:
@@ -725,5 +741,26 @@ TEST(ConfigLoaderTest, InvalidYamlReturnsEmptyConfig) {
       to::app::load_application_config_from_file(temp_path.c_str());
   EXPECT_FALSE(application_from_file.configured);
   EXPECT_FALSE(application_from_file.valid());
+}
+
+TEST(ConfigLoaderTest, UnterminatedScalarsReturnEmptyConfigs) {
+  const std::string invalid_workflow = "id: \"unterminated";
+  const std::string invalid_launch = "launch:\n  interfaces:\n    cli:\n      prompt: \"unterminated";
+  const std::string invalid_application = "application:\n  mode: \"unterminated";
+
+  EXPECT_TRUE(to::app::load_config_from_string(invalid_workflow).id.empty());
+  EXPECT_FALSE(to::app::load_launch_config_from_string(invalid_launch).configured);
+  EXPECT_FALSE(to::app::load_application_config_from_string(invalid_application).configured);
+
+  const std::filesystem::path workflow_path =
+      write_temp_yaml_file("task_orchestrator_invalid_workflow_scalar.yaml", invalid_workflow);
+  const std::filesystem::path launch_path =
+      write_temp_yaml_file("task_orchestrator_invalid_launch_scalar.yaml", invalid_launch);
+  const std::filesystem::path application_path =
+      write_temp_yaml_file("task_orchestrator_invalid_application_scalar.yaml", invalid_application);
+
+  EXPECT_TRUE(to::app::load_config_from_file(workflow_path.c_str()).id.empty());
+  EXPECT_FALSE(to::app::load_launch_config_from_file(launch_path.c_str()).configured);
+  EXPECT_FALSE(to::app::load_application_config_from_file(application_path.c_str()).configured);
 }
 }  // namespace

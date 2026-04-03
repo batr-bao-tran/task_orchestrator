@@ -32,7 +32,12 @@ TaskExecutor::TaskExecutor(const std::size_t worker_count) {
   impl_ = std::make_unique<Impl>(effective_worker_count);
 }
 
-TaskExecutor::~TaskExecutor() noexcept { impl_->thread_pool.join(); }
+TaskExecutor::~TaskExecutor() noexcept { stop(); }
+
+void TaskExecutor::stop() noexcept {
+  impl_->thread_pool.stop();
+  impl_->thread_pool.join();
+}
 
 std::size_t TaskExecutor::worker_count() const noexcept { return impl_->configured_worker_count; }
 

@@ -20,6 +20,9 @@ class TaskExecutor {
   explicit TaskExecutor(std::size_t worker_count);
   ~TaskExecutor() noexcept;
 
+  /** @brief Cancel pending work and join worker threads. Safe to call multiple times. */
+  void stop() noexcept;
+
   TaskExecutor(const TaskExecutor&) = delete;
   TaskExecutor& operator=(const TaskExecutor&) = delete;
   TaskExecutor(TaskExecutor&&) = delete;

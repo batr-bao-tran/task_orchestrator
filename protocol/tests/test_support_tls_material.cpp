@@ -11,6 +11,8 @@
 #include <array>
 #include <memory>
 
+// LCOV_EXCL_START: test-only OpenSSL scaffolding used to generate ephemeral TLS fixtures for protocol tests.
+// It is exercised indirectly by tests, but excluding this helper keeps backend coverage focused on product code.
 namespace task_orchestrator::protocol::test_support {
 
 namespace {
@@ -76,6 +78,8 @@ std::string bio_to_string(BIO* bio) {
 
 EvtPkeyPtr generate_private_key(std::string* error_message) {
   EvtPkeyCtxPtr key_generation_context(EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr));
+  // LCOV_EXCL_START: exercising OpenSSL allocator and keygen failure branches in a deterministic way would require
+  // process-wide fault injection inside this test-only helper.
   if (key_generation_context == nullptr) {
     *error_message = "Failed to allocate TLS test key generation context: " + last_openssl_error();
     return nullptr;
@@ -92,6 +96,7 @@ EvtPkeyPtr generate_private_key(std::string* error_message) {
     *error_message = "Failed to generate TLS test private key: " + last_openssl_error();
     return nullptr;
   }
+  // LCOV_EXCL_STOP
 
   return EvtPkeyPtr(generated_private_key);
 }
@@ -102,6 +107,8 @@ TestTlsMaterial generate_localhost_tls_material() {
 
   EvtPkeyPtr private_key = generate_private_key(&material.error_message);
   X509Ptr certificate(X509_new());
+  // LCOV_EXCL_START: these are defensive failures in test-only OpenSSL scaffolding and are impractical to trigger
+  // reliably without invasive fault injection into the crypto library.
   if (private_key == nullptr || certificate == nullptr) {
     if (certificate == nullptr && material.error_message.empty()) {
       material.error_message = "Failed to allocate TLS test material: " + last_openssl_error();
@@ -146,6 +153,7 @@ TestTlsMaterial generate_localhost_tls_material() {
   if (!material.ok) {
     material.error_message = "Failed to serialize TLS test material into PEM strings.";
   }
+  // LCOV_EXCL_STOP
   return material;
 }
 
@@ -157,3 +165,4 @@ const TestTlsMaterial& localhost_tls_material() noexcept {
 }
 
 }  // namespace task_orchestrator::protocol::test_support
+// LCOV_EXCL_STOP

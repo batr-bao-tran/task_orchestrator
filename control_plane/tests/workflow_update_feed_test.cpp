@@ -50,5 +50,18 @@ TEST(WorkflowUpdateFeedTest, UnblocksWaitingSubscriberWhenNewEventArrives) {
   EXPECT_EQ("wf-live", observed->workflow_id);
 }
 
+TEST(WorkflowUpdateFeedTest, ShutdownUnblocksWaitersAndSuppressesFurtherUpdates) {
+  auto feed = make_in_memory_workflow_update_feed();
+
+  std::optional<WorkflowUpdateEvent> observed;
+  std::jthread waiter([&]() { observed = feed->wait_for_update(0, std::chrono::milliseconds(250)); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  feed->shutdown();
+  waiter.join();
+
+  EXPECT_FALSE(observed.has_value());
+  EXPECT_FALSE(feed->wait_for_update(0, std::chrono::milliseconds(1)).has_value());
+}
+
 }  // namespace
 }  // namespace task_orchestrator::control_plane::service

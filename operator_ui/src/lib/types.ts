@@ -168,10 +168,27 @@ export interface WorkflowActionCommand {
   actor?: string;
 }
 
+export interface TaskStateOverride {
+  taskId: string;
+  completed?: boolean;
+  requestedTime?: number;
+  deadline?: number;
+  priority?: number;
+  pinnedActorId?: string;
+}
+
+export interface ActorStateOverride {
+  actorId: string;
+  unavailable?: boolean;
+  capacity?: number;
+}
+
 export interface ManualInterventionCommand {
   workflowId: string;
   note: string;
   actor?: string;
+  taskOverrides?: TaskStateOverride[];
+  actorOverrides?: ActorStateOverride[];
   triggerReorchestration: boolean;
 }
 
