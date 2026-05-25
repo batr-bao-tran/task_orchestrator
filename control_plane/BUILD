@@ -66,7 +66,9 @@ cc_library(
 
 cc_test(
     name = "control_plan_service_test",
+    size = "small",
     srcs = ["tests/control_plan_service_test.cpp"],
+    linkstatic = True,
     deps = [
         ":service",
         ":store",
@@ -78,7 +80,9 @@ cc_test(
 
 cc_test(
     name = "event_storage_management_service_test",
+    size = "small",
     srcs = ["tests/event_storage_management_service_test.cpp"],
+    linkstatic = True,
     deps = [
         ":service",
         ":store",
@@ -90,7 +94,9 @@ cc_test(
 
 cc_test(
     name = "integration_test",
+    size = "small",
     srcs = ["tests/integration_test.cpp"],
+    linkstatic = True,
     deps = [
         ":integration",
         "@googletest//:gtest_main",
@@ -99,7 +105,9 @@ cc_test(
 
 cc_test(
     name = "sqlite_workflow_store_test",
+    size = "small",
     srcs = ["tests/sqlite_workflow_store_test.cpp"],
+    linkstatic = True,
     deps = [
         ":store",
         "//protocol:control_plane_api",
@@ -110,7 +118,9 @@ cc_test(
 
 cc_test(
     name = "plan_diff_test",
+    size = "small",
     srcs = ["tests/plan_diff_test.cpp"],
+    linkstatic = True,
     deps = [
         ":service",
         "//protocol:control_plane_api",
@@ -121,7 +131,9 @@ cc_test(
 
 cc_test(
     name = "workflow_update_feed_test",
+    size = "small",
     srcs = ["tests/workflow_update_feed_test.cpp"],
+    linkstatic = True,
     deps = [
         ":service",
         "@googletest//:gtest_main",

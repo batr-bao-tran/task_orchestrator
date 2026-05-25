@@ -1,6 +1,9 @@
 #include "runner/application.hpp"
 
+#include <arpa/inet.h>
 #include <gtest/gtest.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include <array>
@@ -185,6 +188,42 @@ std::filesystem::path runfiles_path(std::string_view relative_path) {
   EXPECT_NE(nullptr, test_workspace);
   return std::filesystem::path(test_srcdir) / test_workspace / relative_path;
 }
+
+class ScopedListeningSocket final {
+ public:
+  ScopedListeningSocket() {
+    socket_descriptor_ = ::socket(AF_INET, SOCK_STREAM, 0);
+    EXPECT_GE(socket_descriptor_, 0);
+    if (socket_descriptor_ < 0) {
+      return;
+    }
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+    EXPECT_EQ(0, ::bind(socket_descriptor_, reinterpret_cast<const sockaddr*>(&address), sizeof(address)));
+
+    sockaddr_in bound_address{};
+    socklen_t bound_address_size = sizeof(bound_address);
+    EXPECT_EQ(0, ::getsockname(socket_descriptor_, reinterpret_cast<sockaddr*>(&bound_address), &bound_address_size));
+    port_ = ntohs(bound_address.sin_port);
+
+    EXPECT_EQ(0, ::listen(socket_descriptor_, 1));
+  }
+
+  ~ScopedListeningSocket() noexcept {
+    if (socket_descriptor_ >= 0) {
+      ::close(socket_descriptor_);
+    }
+  }
+
+  [[nodiscard]] int port() const noexcept { return port_; }
+
+ private:
+  int socket_descriptor_ = -1;
+  int port_ = 0;
+};
 
 std::string workflow_yaml(std::string_view workflow_id) {
   return "id: " + std::string(workflow_id) + R"(
@@ -402,6 +441,7 @@ TEST(ApplicationTest, RunRejectsIncompleteConfigsForSelectedMode) {
               .configured = true,
               .security = {},
               .interfaces = {},
+              .control_plane = {},
               .bootstrap_request = {},
               .bootstrap_workflow = std::nullopt,
           },
@@ -516,6 +556,7 @@ TEST_P(ApplicationAuthModeTest, RunServeModeSupportsBootstrapWorkflowWithConfigu
                       .http = {},
                       .grpc = {},
                   },
+              .control_plane = {},
               .bootstrap_request = {},
               .bootstrap_workflow = rich_workflow_config("bootstrap_direct"),
           },
@@ -550,6 +591,7 @@ TEST(ApplicationTest, RunServeModeRejectsMissingBootstrapWorkflowRequest) {
                       .http = {},
                       .grpc = {},
                   },
+              .control_plane = {},
               .bootstrap_request =
                   {
                       .kind = to::app::RequestFileKind::WorkflowYaml,
@@ -594,6 +636,7 @@ TEST(ApplicationTest, RunServeModeContinuesServingWhenBootstrapRequestHasCapacit
                       .http = {},
                       .grpc = {},
                   },
+              .control_plane = {},
               .bootstrap_request =
                   {
                       .kind = to::app::RequestFileKind::WorkflowYaml,
@@ -627,6 +670,7 @@ TEST(ApplicationTest, RunServeModeContinuesServingWhenInlineBootstrapWorkflowHas
                       .http = {},
                       .grpc = {},
                   },
+              .control_plane = {},
               .bootstrap_request = {},
               .bootstrap_workflow =
                   to::app::WorkflowConfig{
@@ -695,6 +739,7 @@ TEST(ApplicationTest, RunServeModeHandlesCliUsageErrorsAndClosedInput) {
                       .http = {},
                       .grpc = {},
                   },
+              .control_plane = {},
               .bootstrap_request = {},
               .bootstrap_workflow = std::nullopt,
           },
@@ -726,6 +771,7 @@ TEST(ApplicationTest, RunServeModeExitsWhenCliInputCloses) {
                       .http = {},
                       .grpc = {},
                   },
+              .control_plane = {},
               .bootstrap_request = {},
               .bootstrap_workflow = std::nullopt,
           },
@@ -768,6 +814,7 @@ TEST(ApplicationTest, RunServeModeProcessesCliCommandsAndBootstrapWorkflow) {
                       .http = {},
                       .grpc = {},
                   },
+              .control_plane = {},
               .bootstrap_request =
                   {
                       .kind = to::app::RequestFileKind::WorkflowYaml,
@@ -811,6 +858,7 @@ TEST(ApplicationTest, RunServeModeProcessesTextBootstrapRequest) {
                       .http = {},
                       .grpc = {},
                   },
+              .control_plane = {},
               .bootstrap_request =
                   {
                       .kind = to::app::RequestFileKind::WorkflowText,
@@ -895,6 +943,7 @@ TEST(ApplicationTest, RunServeModeFailsWhenHttpServerCannotStart) {
                           },
                       .grpc = {},
                   },
+              .control_plane = {},
               .bootstrap_request = {},
               .bootstrap_workflow = std::nullopt,
           },
@@ -905,6 +954,7 @@ TEST(ApplicationTest, RunServeModeFailsWhenHttpServerCannotStart) {
 
 TEST(ApplicationTest, RunServeModeStopsHttpServerWhenGrpcServerCannotStart) {
   const ScopedTempDirectory temp_directory;
+  const ScopedListeningSocket occupied_grpc_port;
   const to::app::ApplicationConfig config{
       .configured = true,
       .mode = to::app::ApplicationMode::Serve,
@@ -931,12 +981,13 @@ TEST(ApplicationTest, RunServeModeStopsHttpServerWhenGrpcServerCannotStart) {
                               .enabled = true,
                               .endpoint =
                                   {
-                                      .bind_address = "not-an-ip-address",
-                                      .port = 0,
+                                      .bind_address = "127.0.0.1",
+                                      .port = occupied_grpc_port.port(),
                                       .tls = {},
                                   },
                           },
                   },
+              .control_plane = {},
               .bootstrap_request = {},
               .bootstrap_workflow = std::nullopt,
           },

@@ -6,4 +6,5 @@ cc_tests_from_glob(
         "//utils",
         "@googletest//:gtest_main",
     ],
+    linkstatic = True,
 )

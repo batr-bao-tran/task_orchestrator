@@ -37,13 +37,15 @@ repos:
         args: ["-mode=fix", "-lint=fix"]
       - id: buildifier-lint
   # C++
-  - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v15.0.7
-    hooks:
-      - id: clang-format
-        files: \.(cpp|cxx|c|cc|h|hpp|hxx|txx)$
   - repo: local
     hooks:
+      - id: clang-format-fix
+        name: clang-format
+        entry: python3 scripts/run_clang_format.py
+        language: system
+        files: \.(cpp|cxx|c|cc|h|hpp|hxx|txx)$
+        exclude: '((^|/)third_party/|(^|/)external/)'
+        pass_filenames: true
       - id: clang-tidy-fix
         name: clang-tidy
         entry: python3 scripts/run_clang_tidy_fix.py --fix

@@ -2,11 +2,22 @@
 
 #include <gtest/gtest.h>
 
+#include <cstring>
 #include <functional>
 #include <sstream>
+#include <type_traits>
 
 namespace {
 namespace to = task_orchestrator;
+
+template <typename Enum>
+Enum make_invalid_enum_for_test(const std::underlying_type_t<Enum> raw_value) {
+  static_assert(std::is_enum_v<Enum>);
+  Enum value{};
+  static_assert(sizeof(value) == sizeof(raw_value));
+  std::memcpy(&value, &raw_value, sizeof(value));
+  return value;
+}
 
 TEST(PlannerFsmTest, InitialState) {
   to::PlannerStateMachine fsm;
@@ -120,7 +131,7 @@ TEST(PlannerFsmTest, StreamOperatorRendersAllEnumStates) {
   EXPECT_EQ("Idle,Planning,Dispatching,Running,Completing", stream.str());
 
   std::ostringstream invalid_stream;
-  invalid_stream << static_cast<to::PlannerState>(999);
+  invalid_stream << make_invalid_enum_for_test<to::PlannerState>(999);
   EXPECT_EQ("PlannerState(?)", invalid_stream.str());
 }
 

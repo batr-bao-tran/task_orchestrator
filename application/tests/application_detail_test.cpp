@@ -718,6 +718,7 @@ TEST(ApplicationDetailTest, RunModeHelpersHandleDirectErrorPaths) {
                     .configured = true,
                     .security = {},
                     .interfaces = {},
+                    .control_plane = {},
                     .bootstrap_request = {},
                     .bootstrap_workflow = std::nullopt,
                 },
@@ -739,6 +740,7 @@ TEST(ApplicationDetailTest, RunModeHelpersHandleDirectErrorPaths) {
                             .http = {},
                             .grpc = {},
                         },
+                    .control_plane = {},
                     .bootstrap_request =
                         {
                             .kind = to::app::RequestFileKind::WorkflowYaml,

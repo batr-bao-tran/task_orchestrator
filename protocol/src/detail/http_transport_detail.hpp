@@ -308,10 +308,10 @@ inline std::optional<OperatorTaskRoute> extract_operator_task_delete_route(std::
 }
 
 template <typename Message>
-Message make_error_message(std::string error_message) {
+Message make_error_message(const std::string& error_message) {
   Message response;
   response.set_ok(false);
-  response.set_error_message(std::move(error_message));
+  response.set_error_message(error_message);
   return response;
 }
 
@@ -436,10 +436,10 @@ bool write_operator_sse_end(Stream& stream, beast::error_code* error_code) {
   return !(*error_code);
 }
 
-inline RuntimeApiResponse make_transport_error_response(std::string error_message) {
+inline RuntimeApiResponse make_transport_error_response(const std::string& error_message) {
   RuntimeApiResponse response;
   response.set_ok(false);
-  response.set_error_message(std::move(error_message));
+  response.set_error_message(error_message);
   response.mutable_result()->set_ok(false);
   response.mutable_result()->set_error_message(response.error_message());
   return response;
@@ -537,11 +537,8 @@ inline bool make_server_tls_context(const LoadedTlsServerConfig& tls_config,
     return false;
   }
 
-  if (tls_config.require_client_certificate) {
-    (*context)->set_verify_mode(ssl::verify_peer | ssl::verify_fail_if_no_peer_cert);
-  } else {
-    (*context)->set_verify_mode(ssl::verify_none);
-  }
+  (*context)->set_verify_mode(
+      tls_config.require_client_certificate ? ssl::verify_peer | ssl::verify_fail_if_no_peer_cert : ssl::verify_none);
 
   return true;
 }
@@ -594,10 +591,10 @@ inline bool ignorable_tls_shutdown_error(const beast::error_code& error_code) {
 }
 
 inline http::response<http::string_body> make_http_error(http::status status,
-                                                         std::string error_message,
+                                                         const std::string& error_message,
                                                          unsigned version,
                                                          bool keep_alive) {
-  const RuntimeApiResponse response = make_transport_error_response(std::move(error_message));
+  const RuntimeApiResponse response = make_transport_error_response(error_message);
   std::string body;
   std::string content_type;
   std::string serialization_error;
@@ -884,7 +881,7 @@ inline http::response<http::string_body> handle_http_request(WorkflowRuntimeServ
 
 inline http::request<http::string_body> make_http_client_request(const HttpClientOptions& options,
                                                                  const std::string& target,
-                                                                 std::string body,
+                                                                 const std::string& body,
                                                                  std::string_view content_type) {
   http::request<http::string_body> request(http::verb::post, target, kHttpVersion11);
   request.set(http::field::host, options.host);
@@ -897,7 +894,7 @@ inline http::request<http::string_body> make_http_client_request(const HttpClien
   if (!options.api_key.empty()) {
     request.set(kApiKeyHeader, options.api_key);
   }
-  request.body() = std::move(body);
+  request.body() = body;
   request.prepare_payload();
   return request;
 }

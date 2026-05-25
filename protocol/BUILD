@@ -156,6 +156,7 @@ cc_library(
     includes = [
         ".",
         "include",
+        "src",
     ],
     deps = [
         ":operator_api",
@@ -165,24 +166,43 @@ cc_library(
         "@@boringssl+//:ssl",
         "@boost",
         "@protobuf",
+        "@protobuf//:json_util",
+        "@protobuf//:type_resolver",
     ],
 )
 
 cc_library(
     name = "grpc_transport_detail",
     hdrs = ["src/detail/grpc_transport_detail.hpp"],
-    includes = ["."],
+    includes = [
+        ".",
+        "include",
+        "src",
+    ],
     deps = [
-        ":grpc_transport",
+        ":runtime_api",
+        ":task_orchestration_service_cc_grpc",
+        ":tls_credentials",
+        "//utils",
     ],
 )
 
 cc_library(
     name = "grpc_transport_impl_source",
     testonly = True,
-    includes = ["."],
+    hdrs = ["include/protocol/grpc_transport.hpp"],
+    includes = [
+        ".",
+        "include",
+    ],
     textual_hdrs = ["src/grpc_transport.cpp"],
     visibility = ["//protocol/tests:__pkg__"],
+    deps = [
+        ":runtime_api",
+        ":task_orchestration_service_cc_grpc",
+        ":tls_credentials",
+        "//utils",
+    ],
 )
 
 cc_library(
