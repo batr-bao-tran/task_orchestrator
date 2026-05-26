@@ -30,6 +30,7 @@ build:sanitize --repo_env=CXX=clang++
 build:sanitize --copt=-fsanitize=address,undefined
 build:sanitize --cxxopt=-fsanitize=address,undefined
 build:sanitize --linkopt=-fsanitize=address,undefined
+build:sanitize --linkopt=-fsanitize-link-c++-runtime
 build:sanitize --copt=-fno-omit-frame-pointer
 build:sanitize --cxxopt=-fno-omit-frame-pointer
 build:sanitize --copt=-O1

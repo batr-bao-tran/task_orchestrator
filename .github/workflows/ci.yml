@@ -287,7 +287,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install lint tools
-        run: sudo apt-get update && sudo apt-get install -y clang-tidy clang-format python3-pip lld
+        run: tools/ci/install_llvm_22.sh
 
       - name: Compute Bazel cache settings
         id: bazel-cache
@@ -352,7 +352,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install clang and lld
-        run: sudo apt-get update && sudo apt-get install -y clang lld
+        run: tools/ci/install_llvm_22.sh
 
       - name: Compute Bazel cache settings
         id: bazel-cache

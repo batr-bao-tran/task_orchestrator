@@ -181,7 +181,7 @@ struct BeastHttpWorkflowApiServer::Impl {
     }
     if (worker_pool) {
       worker_pool->stop();
-      close_active_sockets();
+      close_active_sockets(active_sockets_mutex, active_sockets);
       worker_pool->join();
       worker_pool.reset();
     }
@@ -194,17 +194,21 @@ struct BeastHttpWorkflowApiServer::Impl {
            std::to_string(bound_port == 0 ? options.port : bound_port);
   }
 
-  void register_socket(tcp::socket* socket) {
+  static void register_socket(std::mutex& active_sockets_mutex,
+                              std::set<tcp::socket*>& active_sockets,
+                              tcp::socket* socket) {
     std::scoped_lock lock(active_sockets_mutex);
     active_sockets.insert(socket);
   }
 
-  void unregister_socket(tcp::socket* socket) {
+  static void unregister_socket(std::mutex& active_sockets_mutex,
+                                std::set<tcp::socket*>& active_sockets,
+                                tcp::socket* socket) {
     std::scoped_lock lock(active_sockets_mutex);
     active_sockets.erase(socket);
   }
 
-  void close_active_sockets() {
+  static void close_active_sockets(std::mutex& active_sockets_mutex, std::set<tcp::socket*>& active_sockets) {
     std::scoped_lock lock(active_sockets_mutex);
     for (auto* socket : active_sockets) {
       beast::error_code ec;
@@ -213,6 +217,7 @@ struct BeastHttpWorkflowApiServer::Impl {
     }
   }
 
+  // NOLINTNEXTLINE(readability-make-member-function-const): accepts sockets via mutable Asio state.
   void accept_loop() {
     while (is_running.load()) {
       tcp::socket socket(accept_context);
@@ -339,9 +344,9 @@ struct BeastHttpWorkflowApiServer::Impl {
   }
 
   void handle_plain_connection(tcp::socket socket) {
-    register_socket(&socket);
+    register_socket(active_sockets_mutex, active_sockets, &socket);
     process_http_session(socket);
-    unregister_socket(&socket);
+    unregister_socket(active_sockets_mutex, active_sockets, &socket);
 
     beast::error_code error_code;
     [[maybe_unused]] const auto shutdown_result = socket.shutdown(tcp::socket::shutdown_both, error_code);
@@ -352,18 +357,18 @@ struct BeastHttpWorkflowApiServer::Impl {
 
   void handle_tls_connection(tcp::socket socket) {
     TlsServerStream tls_stream(std::move(socket), *tls_context);
-    register_socket(&tls_stream.next_layer());
+    register_socket(active_sockets_mutex, active_sockets, &tls_stream.next_layer());
 
     beast::error_code error_code;
     tls_stream.handshake(ssl::stream_base::server, error_code);
     if (error_code) {
-      unregister_socket(&tls_stream.next_layer());
+      unregister_socket(active_sockets_mutex, active_sockets, &tls_stream.next_layer());
       logger->warn("HTTP TLS handshake failed: {}", error_code.message());
       return;
     }
 
     process_http_session(tls_stream);
-    unregister_socket(&tls_stream.next_layer());
+    unregister_socket(active_sockets_mutex, active_sockets, &tls_stream.next_layer());
 
     tls_stream.shutdown(error_code);
     if (error_code && !ignorable_tls_shutdown_error(error_code)) {
@@ -412,32 +417,40 @@ struct BeastHttpWorkflowApiClient::Impl {
       return make_transport_error_response(std::move(serialization_error));
     }
 
-    return options.use_tls ? invoke_tls(target, std::move(body), std::move(content_type))
-                           : invoke_plain(target, std::move(body), std::move(content_type));
+    return options.use_tls ? invoke_tls(target, body, content_type) : invoke_plain(target, body, content_type);
   }
 
   [[nodiscard]] http::request<http::string_body> make_request(const std::string& target,
-                                                              std::string body,
+                                                              const std::string& body,
                                                               const std::string& content_type) const {
-    return make_http_client_request(options, target, std::move(body), content_type);
+    return make_http_client_request(options, target, body, content_type);
   }
 
   [[nodiscard]] static RuntimeApiResponse parse_http_response(const http::response<http::string_body>& response) {
     return parse_http_runtime_response(response);
   }
 
-  RuntimeApiResponse fail_transport(const std::string_view context, const beast::error_code& error_code) const {
+  static RuntimeApiResponse fail_transport(const HttpClientOptions& options,
+                                           const std::shared_ptr<spdlog::logger>& logger,
+                                           const std::string_view context,
+                                           const beast::error_code& error_code) {
     const std::string message = std::string(context) + ": " + error_code.message();
-    logger->warn("{} for {}:{}", message, options.host, options.port);
+    const std::string endpoint = options.host + ":" + std::to_string(options.port);
+    logger->warn("{} for {}", message, endpoint);
     return make_transport_error_response(std::string("HTTP transport failed: ") + message);
   }
 
-  RuntimeApiResponse fail_transport(std::string message) const {
-    logger->warn("{} for {}:{}", message, options.host, options.port);
-    return make_transport_error_response(std::string("HTTP transport failed: ") + std::move(message));
+  static RuntimeApiResponse fail_transport(const HttpClientOptions& options,
+                                           const std::shared_ptr<spdlog::logger>& logger,
+                                           const std::string& message) {
+    const std::string endpoint = options.host + ":" + std::to_string(options.port);
+    logger->warn("{} for {}", message, endpoint);
+    return make_transport_error_response(std::string("HTTP transport failed: ") + message);
   }
 
-  RuntimeApiResponse invoke_plain(const std::string& target, std::string body, const std::string& content_type) const {
+  RuntimeApiResponse invoke_plain(const std::string& target,
+                                  const std::string& body,
+                                  const std::string& content_type) const {
     asio::io_context io_context;
     tcp::resolver resolver(io_context);
     beast::tcp_stream stream(io_context);
@@ -446,24 +459,24 @@ struct BeastHttpWorkflowApiClient::Impl {
     beast::error_code error_code;
     const auto resolved_endpoints = resolver.resolve(options.host, std::to_string(options.port), error_code);
     if (error_code) {
-      return fail_transport("HTTP resolve failed", error_code);
+      return fail_transport(options, logger, "HTTP resolve failed", error_code);
     }
     [[maybe_unused]] const auto connect_result = stream.connect(resolved_endpoints, error_code);
     if (error_code) {
-      return fail_transport("HTTP connect failed", error_code);
+      return fail_transport(options, logger, "HTTP connect failed", error_code);
     }
 
-    auto request = make_request(target, std::move(body), content_type);
+    auto request = make_request(target, body, content_type);
     http::write(stream, request, error_code);
     if (error_code) {
-      return fail_transport("HTTP write failed", error_code);
+      return fail_transport(options, logger, "HTTP write failed", error_code);
     }
 
     beast::flat_buffer buffer;
     http::response<http::string_body> response;
     http::read(stream, buffer, response, error_code);
     if (error_code) {
-      return fail_transport("HTTP read failed", error_code);
+      return fail_transport(options, logger, "HTTP read failed", error_code);
     }
 
     [[maybe_unused]] const auto shutdown_result = stream.socket().shutdown(tcp::socket::shutdown_both, error_code);
@@ -473,7 +486,9 @@ struct BeastHttpWorkflowApiClient::Impl {
     return parse_http_response(response);
   }
 
-  RuntimeApiResponse invoke_tls(const std::string& target, std::string body, const std::string& content_type) const {
+  RuntimeApiResponse invoke_tls(const std::string& target,
+                                const std::string& body,
+                                const std::string& content_type) const {
     asio::io_context io_context;
     tcp::resolver resolver(io_context);
     TlsClientStream stream(io_context, *tls_context);
@@ -482,44 +497,44 @@ struct BeastHttpWorkflowApiClient::Impl {
     beast::error_code error_code;
     const auto resolved_endpoints = resolver.resolve(options.host, std::to_string(options.port), error_code);
     if (error_code) {
-      return fail_transport("HTTPS resolve failed", error_code);
+      return fail_transport(options, logger, "HTTPS resolve failed", error_code);
     }
     [[maybe_unused]] const auto connect_result =
         beast::get_lowest_layer(stream).connect(resolved_endpoints, error_code);
     if (error_code) {
-      return fail_transport("HTTPS connect failed", error_code);
+      return fail_transport(options, logger, "HTTPS connect failed", error_code);
     }
 
     const std::string expected_peer_name = resolve_expected_peer_name(options, tls_config);
     std::string transport_error_message;
     if (!configure_tls_server_name(stream, expected_peer_name, &transport_error_message)) {
-      return fail_transport(std::move(transport_error_message));
+      return fail_transport(options, logger, transport_error_message);
     }
     if (tls_config.server_trust.verify_peer) {
       stream.set_verify_callback(ssl::host_name_verification(expected_peer_name));
     }
     stream.handshake(ssl::stream_base::client, error_code);
     if (error_code) {
-      return fail_transport("HTTPS handshake failed", error_code);
+      return fail_transport(options, logger, "HTTPS handshake failed", error_code);
     }
 
-    auto request = make_request(target, std::move(body), content_type);
+    auto request = make_request(target, body, content_type);
     http::write(stream, request, error_code);
     if (error_code) {
-      return fail_transport("HTTPS write failed", error_code);
+      return fail_transport(options, logger, "HTTPS write failed", error_code);
     }
 
     beast::flat_buffer buffer;
     http::response<http::string_body> response;
     http::read(stream, buffer, response, error_code);
     if (error_code) {
-      return fail_transport("HTTPS read failed", error_code);
+      return fail_transport(options, logger, "HTTPS read failed", error_code);
     }
 
     beast::error_code shutdown_error_code;
     stream.shutdown(shutdown_error_code);
     if (shutdown_error_code && !ignorable_tls_shutdown_error(shutdown_error_code)) {
-      return fail_transport("HTTPS shutdown failed", shutdown_error_code);
+      return fail_transport(options, logger, "HTTPS shutdown failed", shutdown_error_code);
     }
     return parse_http_response(response);
   }

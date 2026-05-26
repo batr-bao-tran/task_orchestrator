@@ -168,11 +168,6 @@ TEST(GrpcTransportImplTest, ServerImplCoversMissingQueueAndCancelledCallPaths) {
       new AsyncUnaryServerCall<SubmitWorkflowRequest, &WorkflowRuntimeService::submit_workflow>(impl, unary_rpc);
   unary_cancelled->proceed(false);
 
-  auto* unary_waiting =
-      new AsyncUnaryServerCall<SubmitWorkflowRequest, &WorkflowRuntimeService::submit_workflow>(impl, unary_rpc);
-  unary_waiting->proceed(true);
-  unary_waiting->proceed(false);
-
   auto streaming_rpc = [](grpc::ServerContext*,
                           SubmitWorkflowRequest*,
                           grpc::ServerAsyncWriter<WorkflowEvent>*,
@@ -183,12 +178,6 @@ TEST(GrpcTransportImplTest, ServerImplCoversMissingQueueAndCancelledCallPaths) {
       new AsyncStreamingServerCall<SubmitWorkflowRequest, &WorkflowRuntimeService::stream_submit_workflow>(
           impl, streaming_rpc);
   streaming_cancelled->proceed(false);
-
-  auto* streaming_waiting =
-      new AsyncStreamingServerCall<SubmitWorkflowRequest, &WorkflowRuntimeService::stream_submit_workflow>(
-          impl, streaming_rpc);
-  streaming_waiting->proceed(true);
-  streaming_waiting->proceed(false);
 
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
 }

@@ -9,12 +9,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from llvm_tooling import find_llvm_tool, print_error
 
 def main() -> int:
     root = Path.cwd()
     if not (root / "MODULE.bazel").exists() and not (root / "WORKSPACE").exists():
-        print("Run from repository root.", file=sys.stderr)
-        return 1
+        return print_error("Run from repository root.")
 
     argv = [a.strip() for a in sys.argv[1:] if a.strip()]
     if "--fix" in argv:
@@ -22,14 +22,12 @@ def main() -> int:
 
     gen = root / "scripts" / "generate_compile_commands.py"
     if not gen.exists():
-        print("scripts/generate_compile_commands.py not found.", file=sys.stderr)
-        return 1
+        return print_error("scripts/generate_compile_commands.py not found.")
     if subprocess.run([sys.executable, str(gen)], cwd=root).returncode != 0:
         return 1
     db_path = root / "compile_commands.json"
     if not db_path.exists():
-        print("compile_commands.json not created.", file=sys.stderr)
-        return 1
+        return print_error("compile_commands.json not created.")
 
     def _load_db():
         content = db_path.read_text(encoding="utf-8")
@@ -62,10 +60,14 @@ def main() -> int:
         files = [Path(e["file"]) for e in db if not skip_external_tu(Path(e["file"]))]
     if not files:
         return 0
-    return subprocess.run(
-        ["clang-tidy", "--fix", "-quiet", "-p", str(root)] + [str(p) for p in files],
-        cwd=root,
-    ).returncode
+    try:
+        return subprocess.run(
+            [find_llvm_tool("clang-tidy"), "--fix", "-quiet", "-p", str(root)] + [str(p) for p in files],
+            cwd=root,
+            check=False,
+        ).returncode
+    except RuntimeError as error:
+        return print_error(str(error))
 
 
 if __name__ == "__main__":

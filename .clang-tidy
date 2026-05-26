@@ -42,9 +42,8 @@ Checks: >
 # Turn all the warnings from the checks above into errors.
 WarningsAsErrors: "*"
 
-# Exclude only build artifacts and external deps
-HeaderFilterRegex: .*
-ExcludeHeaderFilterRegex: '.*(bazel-out|bazel-bin|third_party/|external/).*'
+# Only analyze headers that live in this repo's source tree.
+HeaderFilterRegex: '^(.*\/)?(application|control_plane|protocol|task_orchestrator|utils)\/'
 
 CheckOptions:
   - { key: readability-identifier-naming.NamespaceCase,          value: lower_case }

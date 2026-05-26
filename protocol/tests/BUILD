@@ -29,6 +29,7 @@ cc_tests_from_glob(
     default_deps = [
         "@googletest//:gtest_main",
     ],
+    linkstatic = True,
     per_test_deps = {
         "grpc_transport_impl_test.cpp": [
             "//protocol:grpc_transport_impl_source",

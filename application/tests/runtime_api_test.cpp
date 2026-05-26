@@ -12,6 +12,7 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/ssl.hpp>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -20,6 +21,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -38,6 +40,15 @@ namespace beast = boost::beast;
 namespace http = beast::http;
 namespace ssl = asio::ssl;
 using tcp = asio::ip::tcp;
+
+template <typename Enum>
+Enum make_invalid_enum_for_test(const std::underlying_type_t<Enum> raw_value) {
+  static_assert(std::is_enum_v<Enum>);
+  Enum value{};
+  static_assert(sizeof(value) == sizeof(raw_value));
+  std::memcpy(&value, &raw_value, sizeof(value));
+  return value;
+}
 using TestTlsServerStream = beast::ssl_stream<tcp::socket>;
 
 inline constexpr auto kTransportFailurePropagationDelay = std::chrono::milliseconds(100);
@@ -644,7 +655,8 @@ std::vector<ServerTlsFailureCase> make_server_tls_failure_cases() {
                           .certificate_chain =
                               tp::TlsDataSource::from_inline_pem(test_tls_material().certificate_chain_pem),
                           .private_key = tp::TlsDataSource::from_inline_pem(test_tls_material().private_key_pem),
-                          .private_key_password = {.kind = static_cast<tp::TlsDataSourceKind>(999), .value = "unused"},
+                          .private_key_password = {.kind = make_invalid_enum_for_test<tp::TlsDataSourceKind>(999),
+                                                   .value = "unused"},
                       },
                   .client_trust = {},
                   .require_client_certificate = false,
