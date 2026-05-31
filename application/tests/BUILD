@@ -52,7 +52,4 @@ cc_tests_from_glob(
             "//protocol:tls_credentials",
         ],
     },
-    per_test_size = {
-        "runtime_api_test.cpp": "medium",
-    },
 )

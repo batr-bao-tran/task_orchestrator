@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { fromDatetimeLocalValue } from "../lib/date-time";
+import { fromDisplayTimestamp } from "../lib/schedule-time";
 import type {
   ActorStateOverride,
   ManualInterventionCommand,
   TaskStateOverride,
+  WorkflowScheduleMode,
   WorkflowActionCommand,
   WorkflowDetail,
 } from "../lib/types";
@@ -39,7 +41,11 @@ function makeEmptyActorOverride(): ActorOverrideDraft {
   return { actorId: "", unavailable: false, capacity: "" };
 }
 
-function buildTaskOverrides(drafts: TaskOverrideDraft[]): TaskStateOverride[] {
+function buildTaskOverrides(
+  drafts: TaskOverrideDraft[],
+  scheduleMode: WorkflowScheduleMode | undefined,
+  scheduleAnchorMs: number | undefined,
+): TaskStateOverride[] {
   return drafts
     .filter((draft) => draft.taskId.length > 0)
     .map((draft) => {
@@ -51,7 +57,14 @@ function buildTaskOverrides(drafts: TaskOverrideDraft[]): TaskStateOverride[] {
         override.priority = Number(draft.priority);
       }
       if (draft.deadlineAt.length > 0) {
-        override.deadline = fromDatetimeLocalValue(draft.deadlineAt);
+        override.deadline = fromDisplayTimestamp(
+          fromDatetimeLocalValue(draft.deadlineAt),
+          {
+            mode: scheduleMode ?? "absolute_ms",
+            anchorMs: scheduleAnchorMs,
+          },
+          { zeroMeansUnset: true },
+        );
       }
       if (draft.pinnedActorId.length > 0) {
         override.pinnedActorId = draft.pinnedActorId;
@@ -372,7 +385,7 @@ export function WorkflowControls({
         className="action-button action-button--primary"
         disabled={busy || (!hasNote && !hasOverrides)}
         onClick={() => {
-          const builtTaskOverrides = buildTaskOverrides(taskOverrides);
+          const builtTaskOverrides = buildTaskOverrides(taskOverrides, detail.scheduleMode, detail.scheduleAnchorMs);
           const builtActorOverrides = buildActorOverrides(actorOverrides);
           void onManualIntervention({
             workflowId: detail.summary.workflowId,

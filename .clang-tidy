@@ -42,8 +42,9 @@ Checks: >
 # Turn all the warnings from the checks above into errors.
 WarningsAsErrors: "*"
 
-# Only analyze headers that live in this repo's source tree.
-HeaderFilterRegex: '^(.*\/)?(application|control_plane|protocol|task_orchestrator|utils)\/'
+# Only report header diagnostics for repository-owned code.
+#  This avoids build artifacts and external dependencies.
+HeaderFilterRegex: '(^|.*/)(application|control_plane|protocol|task_orchestrator|utils)/.*'
 
 CheckOptions:
   - { key: readability-identifier-naming.NamespaceCase,          value: lower_case }

@@ -703,6 +703,20 @@ TEST(ConfigLoaderTest, ExampleApplicationConfigsLoadFromRunfiles) {
   EXPECT_EQ(4U, serve_config.service.interfaces.http.endpoint.io_threads);
   EXPECT_EQ(4U, serve_config.service.interfaces.grpc.endpoint.completion_queue_threads);
   EXPECT_EQ("../workflow_configs/service_bootstrap_rich.yaml", serve_config.service.bootstrap_request.path);
+
+  const to::app::ApplicationConfig warehouse_config = to::app::load_application_config_from_file(
+      runfiles_path("application/examples/application_configs/warehouse_continuous_pipeline.yaml").c_str());
+  EXPECT_TRUE(warehouse_config.configured);
+  EXPECT_EQ(to::app::ApplicationMode::Serve, warehouse_config.mode);
+  EXPECT_TRUE(warehouse_config.service.control_plane.enabled);
+  EXPECT_EQ(".task-orchestrator/control-plane/warehouse_continuous_pipeline.sqlite3",
+            warehouse_config.service.control_plane.database_path);
+  EXPECT_TRUE(warehouse_config.service.interfaces.cli.enabled);
+  EXPECT_TRUE(warehouse_config.service.interfaces.http.enabled);
+  EXPECT_TRUE(warehouse_config.service.interfaces.grpc.enabled);
+  EXPECT_EQ(8080, warehouse_config.service.interfaces.http.endpoint.port);
+  EXPECT_EQ(9090, warehouse_config.service.interfaces.grpc.endpoint.port);
+  EXPECT_EQ("../workflow_configs/warehouse_continuous_pipeline.yaml", warehouse_config.service.bootstrap_request.path);
 }
 
 TEST(ConfigLoaderTest, InvalidYamlReturnsEmptyConfig) {

@@ -199,4 +199,51 @@ describe("WorkflowControls", () => {
     expect(screen.getByRole("button", { name: "Add task override" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Add actor override" })).toBeDisabled();
   });
+
+  it("converts relative workflow deadline overrides back into workflow minutes", async () => {
+    const user = userEvent.setup();
+    const onManualIntervention = vi.fn().mockResolvedValue(undefined);
+    const anchor = new Date("2026-03-29T13:00").getTime();
+    const relativeDetail = {
+      ...detailWithChanges,
+      scheduleMode: "relative_minutes" as const,
+      scheduleAnchorMs: anchor,
+      tasks: [
+        {
+          ...detailWithChanges.tasks[0],
+          id: "pick-108",
+          scheduleMode: "relative_minutes" as const,
+          scheduleAnchorMs: anchor,
+        },
+      ],
+    };
+
+    render(
+      <WorkflowControls
+        busy={false}
+        detail={relativeDetail}
+        onCancel={vi.fn().mockResolvedValue(undefined)}
+        onManualIntervention={onManualIntervention}
+        onPause={vi.fn().mockResolvedValue(undefined)}
+        onResume={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add task override" }));
+    await user.selectOptions(screen.getByLabelText("Task"), "pick-108");
+    fireEvent.change(screen.getByLabelText("New deadline"), { target: { value: "2026-03-29T13:15" } });
+    await user.click(screen.getByRole("button", { name: "Record intervention" }));
+
+    expect(onManualIntervention).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowId: relativeDetail.summary.workflowId,
+        taskOverrides: [
+          {
+            taskId: "pick-108",
+            deadline: 15,
+          },
+        ],
+      }),
+    );
+  });
 });

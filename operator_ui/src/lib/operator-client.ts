@@ -1,5 +1,14 @@
 import { createMockDashboard, createMockDashboardFixtures } from "./mock-data";
 import { formatClockTime, formatDateTime, parseNumber } from "./date-time";
+import {
+  fromDisplayDurationMs,
+  fromDisplayTimestamp,
+  looksLikeAbsoluteTimestamp,
+  normalizeScheduleAnchorMs,
+  toDisplayDurationMs,
+  toDisplayTimestamp,
+  type WorkflowScheduleContext,
+} from "./schedule-time";
 import type {
   DashboardStats,
   DashboardQuery,
@@ -18,6 +27,7 @@ import type {
   WorkflowState,
   WorkflowSummary,
   WorkflowTask,
+  WorkflowScheduleMode,
   WorkflowUpsertCommand,
   WorkflowTaskMutation,
 } from "./types";
@@ -119,11 +129,13 @@ function formatEventType(value: string | undefined): string {
 }
 
 function mapWorkflowSummary(value: Record<string, unknown>): WorkflowSummary {
+  const createdAtUnixMs = parseNumber(value.createdAtUnixMs);
   const updatedAtUnixMs = parseNumber(value.updatedAtUnixMs);
 
   return {
     workflowId: stringValue(value.workflowId),
     state: stateFromProto(typeof value.state === "string" ? value.state : undefined),
+    createdAtUnixMs: createdAtUnixMs > 0 ? createdAtUnixMs : undefined,
     updatedAtUnixMs,
     updatedAt: formatDateTime(updatedAtUnixMs),
     latestPlanVersion: parseNumber(value.latestPlanVersion),
@@ -147,11 +159,52 @@ function mapWorkflowActor(value: Record<string, unknown>): WorkflowActor {
   };
 }
 
-function mapWorkflowTask(value: Record<string, unknown>): WorkflowTask {
-  const requestedTimeMs = parseNumber(value.requestedTime);
-  const durationMs = parseNumber(value.duration);
-  const latestStartTimeMs = parseNumber(value.latestStartTime);
-  const deadlineMs = parseNumber(value.deadline);
+function deriveScheduleContext(
+  summary: Record<string, unknown> | undefined,
+  tasks: unknown,
+  assignments: Record<string, unknown>[],
+): WorkflowScheduleContext {
+  const rawTaskRecords = Array.isArray(tasks) ? tasks : [];
+  if (rawTaskRecords.length === 0 && assignments.length === 0) {
+    return { mode: "absolute_ms" };
+  }
+
+  const timeCandidates = [
+    ...rawTaskRecords.flatMap((task) => {
+      const record = task as Record<string, unknown>;
+      return [
+        parseNumber(record.requestedTime),
+        parseNumber(record.latestStartTime),
+        parseNumber(record.deadline),
+      ];
+    }),
+    ...assignments.flatMap((assignment) => [
+      parseNumber(assignment.startTime),
+      parseNumber(assignment.endTime),
+    ]),
+  ].filter((value) => value > 0);
+
+  if (timeCandidates.some(looksLikeAbsoluteTimestamp)) {
+    return { mode: "absolute_ms" };
+  }
+
+  const createdAtUnixMs = parseNumber(summary?.createdAtUnixMs);
+  const updatedAtUnixMs = parseNumber(summary?.updatedAtUnixMs);
+  return {
+    mode: "relative_minutes",
+    anchorMs: normalizeScheduleAnchorMs(createdAtUnixMs > 0 ? createdAtUnixMs : updatedAtUnixMs),
+  };
+}
+
+function mapWorkflowTask(value: Record<string, unknown>, scheduleContext: WorkflowScheduleContext): WorkflowTask {
+  const requestedTime = parseNumber(value.requestedTime);
+  const duration = parseNumber(value.duration);
+  const latestStartTime = parseNumber(value.latestStartTime);
+  const deadline = parseNumber(value.deadline);
+  const requestedTimeMs = toDisplayTimestamp(requestedTime, scheduleContext);
+  const durationMs = toDisplayDurationMs(duration, scheduleContext);
+  const latestStartTimeMs = toDisplayTimestamp(latestStartTime, scheduleContext, { zeroMeansUnset: true });
+  const deadlineMs = toDisplayTimestamp(deadline, scheduleContext, { zeroMeansUnset: true });
 
   return {
     id: stringValue(value.id),
@@ -163,6 +216,8 @@ function mapWorkflowTask(value: Record<string, unknown>): WorkflowTask {
     latestStartAt: latestStartTimeMs > 0 ? formatDateTime(latestStartTimeMs) : undefined,
     deadlineMs,
     deadlineAt: deadlineMs > 0 ? formatDateTime(deadlineMs) : undefined,
+    scheduleMode: scheduleContext.mode,
+    scheduleAnchorMs: scheduleContext.anchorMs,
     priority: parseNumber(value.priority),
     demand:
       value.demand === undefined || value.demand === null || value.demand === "" ? undefined : parseNumber(value.demand),
@@ -188,9 +243,9 @@ function mapWorkflowTask(value: Record<string, unknown>): WorkflowTask {
   };
 }
 
-function mapAssignment(value: Record<string, unknown>): WorkflowAssignment {
-  const startTimeMs = parseNumber(value.startTime);
-  const endTimeMs = parseNumber(value.endTime);
+function mapAssignment(value: Record<string, unknown>, scheduleContext: WorkflowScheduleContext): WorkflowAssignment {
+  const startTimeMs = toDisplayTimestamp(parseNumber(value.startTime), scheduleContext);
+  const endTimeMs = toDisplayTimestamp(parseNumber(value.endTime), scheduleContext);
 
   return {
     taskId: stringValue(value.taskId),
@@ -228,7 +283,11 @@ function mapAuditEntry(value: Record<string, unknown>): WorkflowAuditEntry {
   };
 }
 
-function mapPlanDiff(value: Record<string, unknown> | undefined): PlanChange[] {
+function formatPlanStartTime(value: unknown, scheduleContext: WorkflowScheduleContext): string {
+  return formatClockTime(toDisplayTimestamp(parseNumber(value), scheduleContext));
+}
+
+function mapPlanDiff(value: Record<string, unknown> | undefined, scheduleContext: WorkflowScheduleContext): PlanChange[] {
   if (value === undefined) {
     return [];
   }
@@ -242,14 +301,14 @@ function mapPlanDiff(value: Record<string, unknown> | undefined): PlanChange[] {
       const record = assignment as Record<string, unknown>;
       return {
         taskId: stringValue(record.taskId),
-        after: `${stringValue(record.actorId, "unassigned")} @ ${formatClockTime(record.startTime)}`,
+        after: `${stringValue(record.actorId, "unassigned")} @ ${formatPlanStartTime(record.startTime, scheduleContext)}`,
       };
     }),
     ...removedAssignments.map((assignment) => {
       const record = assignment as Record<string, unknown>;
       return {
         taskId: stringValue(record.taskId),
-        before: `${stringValue(record.actorId, "unassigned")} @ ${formatClockTime(record.startTime)}`,
+        before: `${stringValue(record.actorId, "unassigned")} @ ${formatPlanStartTime(record.startTime, scheduleContext)}`,
       };
     }),
     ...changedAssignments.map((assignment) => {
@@ -259,8 +318,8 @@ function mapPlanDiff(value: Record<string, unknown> | undefined): PlanChange[] {
 
       return {
         taskId: stringValue(before.taskId, stringValue(after.taskId)),
-        before: `${stringValue(before.actorId, "unassigned")} @ ${formatClockTime(before.startTime)}`,
-        after: `${stringValue(after.actorId, "unassigned")} @ ${formatClockTime(after.startTime)}`,
+        before: `${stringValue(before.actorId, "unassigned")} @ ${formatPlanStartTime(before.startTime, scheduleContext)}`,
+        after: `${stringValue(after.actorId, "unassigned")} @ ${formatPlanStartTime(after.startTime, scheduleContext)}`,
       };
     }),
   ];
@@ -289,6 +348,7 @@ function mapWorkflowDetail(
   }
 
   const workflow = (selectedWorkflow.workflow as Record<string, unknown> | undefined) ?? {};
+  const workflowSummary = (workflow.summary as Record<string, unknown> | undefined) ?? {};
   const summary = mapWorkflowSummary((workflow.summary as Record<string, unknown> | undefined) ?? {});
   const config = (workflow.config as Record<string, unknown> | undefined) ?? {};
   const latestResponse = (workflow.latestResponse as Record<string, unknown> | undefined) ?? {};
@@ -296,8 +356,6 @@ function mapWorkflowDetail(
   const audits = Array.isArray(selectedWorkflow.auditEntries)
     ? selectedWorkflow.auditEntries.map((entry) => mapAuditEntry(entry as Record<string, unknown>))
     : [];
-  const planDiff: PlanChange[] = mapPlanDiff((selectedPlanDiff?.diff as Record<string, unknown> | undefined) ?? undefined);
-
   let rawAssignments: Record<string, unknown>[] = Array.isArray(latestResult.assignments)
     ? (latestResult.assignments as Record<string, unknown>[])
     : [];
@@ -306,13 +364,23 @@ function mapWorkflowDetail(
     rawAssignments = extractAssignmentsFromPlanVersions(selectedWorkflow.planVersions);
   }
 
+  const scheduleContext = deriveScheduleContext(workflowSummary, config.tasks, rawAssignments);
+  const planDiff: PlanChange[] = mapPlanDiff(
+    (selectedPlanDiff?.diff as Record<string, unknown> | undefined) ?? undefined,
+    scheduleContext,
+  );
+
   const tasks: WorkflowTask[] = Array.isArray(config.tasks)
-    ? config.tasks.map((task) => mapWorkflowTask(task as Record<string, unknown>)).sort((left, right) => left.requestedTimeMs - right.requestedTimeMs)
+    ? config.tasks
+        .map((task) => mapWorkflowTask(task as Record<string, unknown>, scheduleContext))
+        .sort((left, right) => left.requestedTimeMs - right.requestedTimeMs)
     : [];
-  const mappedAssignments = rawAssignments.map((assignment) => mapAssignment(assignment));
+  const mappedAssignments = rawAssignments.map((assignment) => mapAssignment(assignment, scheduleContext));
 
   return {
     summary,
+    scheduleMode: scheduleContext.mode,
+    scheduleAnchorMs: scheduleContext.anchorMs,
     actors: Array.isArray(config.actors) ? config.actors.map((actor) => mapWorkflowActor(actor as Record<string, unknown>)) : [],
     tasks,
     assignments: mappedAssignments,
@@ -426,12 +494,18 @@ async function requestJson(
 }
 
 function toTaskPayload(task: WorkflowTask): Record<string, unknown> {
+  const scheduleMode: WorkflowScheduleMode = task.scheduleMode ?? "absolute_ms";
+  const scheduleContext: WorkflowScheduleContext = {
+    mode: scheduleMode,
+    anchorMs: task.scheduleAnchorMs,
+  };
+
   return {
     id: task.id,
-    requestedTime: String(task.requestedTimeMs),
-    duration: String(task.durationMs),
-    latestStartTime: String(task.latestStartTimeMs),
-    deadline: String(task.deadlineMs),
+    requestedTime: String(fromDisplayTimestamp(task.requestedTimeMs, scheduleContext)),
+    duration: String(fromDisplayDurationMs(task.durationMs, scheduleContext)),
+    latestStartTime: String(fromDisplayTimestamp(task.latestStartTimeMs, scheduleContext, { zeroMeansUnset: true })),
+    deadline: String(fromDisplayTimestamp(task.deadlineMs, scheduleContext, { zeroMeansUnset: true })),
     priority: String(task.priority),
     demand: task.demand,
     mandatory: task.mandatory,

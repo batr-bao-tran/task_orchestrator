@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createLiveOperatorClient, createMockOperatorClient, readOperatorClientConfig } from "../../src/lib/operator-client";
+import { formatClockTime } from "../../src/lib/date-time";
 import {
   buildOperatorDashboardPayload,
   buildOperatorDashboardUpdatePayload,
@@ -135,6 +136,100 @@ describe("operator client", () => {
       startAt: "29 Mar, 10:43",
       endAt: "29 Mar, 10:58",
     });
+  });
+
+  it("maps relative-time workflow units onto an anchored live schedule", async () => {
+    const anchor = Date.parse("2026-04-04T09:00:00Z");
+    const payload = {
+      ok: true,
+      serverTimeUnixMs: String(anchor),
+      stats: {
+        recentEventsPersisted: "1",
+        planVersionsRetained: "1",
+        connectorsTracked: "0",
+        workflowsTracked: "1",
+        activeWorkflows: "1",
+      },
+      workflows: [
+        {
+          workflowId: "wf-relative",
+          state: "WORKFLOW_LIFECYCLE_STATE_PLANNED",
+          createdAtUnixMs: String(anchor),
+          updatedAtUnixMs: String(anchor),
+          latestPlanVersion: "1",
+          totalEventCount: "1",
+          totalAuditEntryCount: "0",
+        },
+      ],
+      selectedWorkflowId: "wf-relative",
+      selectedWorkflow: {
+        ok: true,
+        workflow: {
+          summary: {
+            workflowId: "wf-relative",
+            state: "WORKFLOW_LIFECYCLE_STATE_PLANNED",
+            createdAtUnixMs: String(anchor),
+            updatedAtUnixMs: String(anchor),
+            latestPlanVersion: "1",
+            totalEventCount: "1",
+            totalAuditEntryCount: "0",
+          },
+          config: {
+            actors: [{ id: "machine_1", type: "machine" }],
+            tasks: [
+              {
+                id: "inbound_van_1_offload",
+                requestedTime: "0",
+                duration: "24",
+                latestStartTime: "4",
+                deadline: "35",
+                priority: "12",
+                requiredCapabilities: ["offload_inbound"],
+              },
+            ],
+          },
+          latestResponse: {
+            result: {
+              assignments: [
+                {
+                  taskId: "inbound_van_1_offload",
+                  actorId: "machine_1",
+                  startTime: "0",
+                  endTime: "24",
+                },
+              ],
+            },
+          },
+        },
+        events: [],
+        auditEntries: [],
+      },
+      selectedPlanDiff: {
+        diff: {
+          addedAssignments: [{ taskId: "inbound_van_1_offload", actorId: "machine_1", startTime: "0" }],
+        },
+      },
+      connectors: [],
+    };
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(payload)));
+    const client = createLiveOperatorClient("http://control-plane", fetchMock);
+    const dashboard = await client.getDashboard({ selectedWorkflowId: "wf-relative" });
+    const task = dashboard.selectedWorkflow?.tasks[0];
+    const assignment = dashboard.selectedWorkflow?.assignments[0];
+
+    expect(task?.scheduleMode).toBe("relative_minutes");
+    expect(task?.scheduleAnchorMs).toBe(anchor);
+    expect(task?.requestedTimeMs).toBe(anchor);
+    expect(task?.durationMinutes).toBe(24);
+    expect(task?.deadlineMs).toBe(anchor + 35 * 60_000);
+    expect(assignment).toMatchObject({
+      startTimeMs: anchor,
+      endTimeMs: anchor + 24 * 60_000,
+    });
+    expect(dashboard.selectedWorkflow?.planDiff).toEqual([
+      { taskId: "inbound_van_1_offload", after: `machine_1 @ ${formatClockTime(anchor)}` },
+    ]);
   });
 
   it("subscribes to the live dashboard SSE stream", () => {
@@ -345,6 +440,56 @@ describe("operator client", () => {
       note: "manual",
       actor: "alice",
       triggerReorchestration: true,
+    });
+  });
+
+  it("serializes relative-time tasks back into workflow units", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(() => Promise.resolve(new Response(JSON.stringify(buildOperatorMutationPayload()))));
+    const client = createLiveOperatorClient("http://control-plane", fetchMock);
+    const anchor = Date.parse("2026-04-04T09:00:00Z");
+
+    await client.upsertTask({
+      workflowId: "wf-relative",
+      task: {
+        id: "inbound_van_1_offload",
+        requestedTimeMs: anchor,
+        requestedAt: "04 Apr, 09:00",
+        durationMs: 24 * 60_000,
+        durationMinutes: 24,
+        latestStartTimeMs: anchor + 4 * 60_000,
+        latestStartAt: "04 Apr, 09:04",
+        deadlineMs: anchor + 35 * 60_000,
+        deadlineAt: "04 Apr, 09:35",
+        scheduleMode: "relative_minutes",
+        scheduleAnchorMs: anchor,
+        priority: 12,
+        mandatory: true,
+        preemptible: false,
+        allowedActorTypes: [],
+        allowedActorIds: [],
+        preferredActorIds: [],
+        requiredCapabilities: ["offload_inbound"],
+        dependencyTaskIds: [],
+        mutuallyExclusiveTaskIds: [],
+        actorDistances: [],
+        tardinessCostPerUnit: 0,
+        earlyStartBonus: 0,
+        phaseDurations: [8, 10, 6],
+      },
+    });
+
+    expect(JSON.parse(readRequestBody(fetchMock, 0))).toMatchObject({
+      workflowId: "wf-relative",
+      task: {
+        id: "inbound_van_1_offload",
+        requestedTime: "0",
+        duration: "24",
+        latestStartTime: "4",
+        deadline: "35",
+        phaseDurations: ["8", "10", "6"],
+      },
     });
   });
 

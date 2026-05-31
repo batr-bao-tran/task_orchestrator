@@ -22,7 +22,7 @@ def main() -> int:
         cwd=root,
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=300,
     )
     if r.returncode != 0:
         print(r.stderr or r.stdout, file=sys.stderr)
