@@ -33,7 +33,6 @@ cc_tests_from_glob(
     per_test_deps = {
         "grpc_transport_impl_test.cpp": [
             "//protocol:grpc_transport_impl_source",
-            "//protocol:grpc_transport_detail",
             "//protocol:runtime_api",
             "//protocol:task_orchestration_service_cc_grpc",
             "//protocol:tls_credentials",

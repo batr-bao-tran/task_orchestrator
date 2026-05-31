@@ -5,6 +5,9 @@ External libs live in third_party/ or external/; we only skip those paths.
 .clang-tidy excludes build artifacts and third_party/external from diagnostics.
 """
 import json
+import os
+import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path

@@ -198,29 +198,30 @@ cc_library(
     textual_hdrs = ["src/grpc_transport.cpp"],
     visibility = ["//protocol/tests:__pkg__"],
     deps = [
+        ":grpc_transport_detail",
         ":runtime_api",
         ":task_orchestration_service_cc_grpc",
         ":tls_credentials",
         "//utils",
+        "@boost",
     ],
 )
 
 cc_library(
     name = "grpc_transport",
-    srcs = [
-        "src/detail/grpc_transport_detail.hpp",
-        "src/grpc_transport.cpp",
-    ],
+    srcs = ["src/grpc_transport.cpp"],
     hdrs = ["include/protocol/grpc_transport.hpp"],
     includes = [
         ".",
         "include",
     ],
     deps = [
+        ":grpc_transport_detail",
         ":runtime_api",
         ":task_orchestration_service_cc_grpc",
         ":tls_credentials",
         "//utils",
+        "@boost",
     ],
 )
 

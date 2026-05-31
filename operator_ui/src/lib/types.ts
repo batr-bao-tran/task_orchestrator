@@ -1,4 +1,5 @@
 export type DataMode = "live" | "mock";
+export type WorkflowScheduleMode = "absolute_ms" | "relative_minutes";
 
 export type WorkflowState =
   | "submitted"
@@ -12,6 +13,7 @@ export type WorkflowState =
 export interface WorkflowSummary {
   workflowId: string;
   state: WorkflowState;
+  createdAtUnixMs?: number;
   updatedAtUnixMs: number;
   updatedAt: string;
   latestPlanVersion: number;
@@ -81,6 +83,8 @@ export interface WorkflowTask {
   latestStartAt?: string;
   deadlineMs: number;
   deadlineAt?: string;
+  scheduleMode?: WorkflowScheduleMode;
+  scheduleAnchorMs?: number;
   priority: number;
   demand?: number;
   mandatory: boolean;
@@ -108,6 +112,8 @@ export interface WorkflowAssignment {
 
 export interface WorkflowDetail {
   summary: WorkflowSummary;
+  scheduleMode?: WorkflowScheduleMode;
+  scheduleAnchorMs?: number;
   planDiff: PlanChange[];
   events: WorkflowEventRecord[];
   audits: WorkflowAuditEntry[];

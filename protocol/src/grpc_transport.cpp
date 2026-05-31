@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <boost/asio/ip/address.hpp>
 #include <chrono>
 #include <deque>
 #include <functional>
@@ -741,6 +742,14 @@ void GrpcWorkflowApiServer::start() {
       return;
     }
     server_credentials = credential_result.server_credentials;
+  }
+
+  boost::system::error_code bind_address_error;
+  (void)boost::asio::ip::make_address(impl.options.bind_address, bind_address_error);
+  if (bind_address_error) {
+    impl.is_running.store(false);
+    impl.logger->error("Invalid gRPC bind address: {}", bind_address_error.message());
+    return;
   }
 
   builder.AddListeningPort(

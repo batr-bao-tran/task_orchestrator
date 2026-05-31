@@ -1,0 +1,32 @@
+application:
+  mode: serve
+  service:
+    security:
+      mode: api_key
+      expected_credential: local-dev-key
+      require_secure_transport: false
+    control_plane:
+      enabled: true
+      database_path: .task-orchestrator/control-plane/warehouse_continuous_pipeline.sqlite3
+      recover_on_start: true
+      prune_after_days: 30
+    bootstrap_request:
+      kind: workflow_yaml
+      path: ../workflow_configs/warehouse_continuous_pipeline.yaml
+    interfaces:
+      cli:
+        enabled: true
+        prompt: "warehouse> "
+      http:
+        enabled: true
+        bind_address: 127.0.0.1
+        port: 8080
+        io_threads: 4
+        max_body_bytes: 2097152
+      grpc:
+        enabled: true
+        bind_address: 127.0.0.1
+        port: 9090
+        completion_queue_threads: 4
+        max_receive_message_bytes: 2097152
+        max_send_message_bytes: 2097152

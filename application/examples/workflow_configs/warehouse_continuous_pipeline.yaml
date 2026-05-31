@@ -1,0 +1,394 @@
+id: warehouse_continuous_pipeline
+optimization:
+  backend: indexed_exact
+  time_limit_ms: 400
+  relative_gap_limit: 0.0
+  num_search_workers: 1
+  allow_partial_plan: true
+  objective:
+    fulfilled_task_weight: 150
+    priority_weight: 30
+    makespan_weight: 2
+    travel_distance_weight: 4
+    tardiness_weight: 15
+    execution_cost_weight: 1
+    preferred_actor_weight: 8
+actors:
+  - id: robot_1
+    type: robot
+    capacity: 1
+    capabilities: [pick, pack, scan, transfer_inbound, transfer_outbound]
+    execution_cost_per_unit: 1.0
+    windows:
+      - start: 0
+        end: 480
+  - id: robot_2
+    type: robot
+    capacity: 1
+    capabilities: [pick, pack, scan, transfer_inbound, transfer_outbound]
+    execution_cost_per_unit: 1.05
+    windows:
+      - start: 0
+        end: 480
+  - id: robot_3
+    type: robot
+    capacity: 1
+    capabilities: [pick, pack, scan]
+    execution_cost_per_unit: 0.95
+    windows:
+      - start: 0
+        end: 480
+  - id: robot_4
+    type: robot
+    capacity: 1
+    capabilities: [pick, pack]
+    execution_cost_per_unit: 0.9
+    windows:
+      - start: 0
+        end: 480
+  - id: inbound_offload_machine_1
+    type: machine
+    capacity: 1
+    capabilities: [offload_inbound]
+    execution_cost_per_unit: 2.4
+    windows:
+      - start: 0
+        end: 480
+  - id: inbound_offload_machine_2
+    type: machine
+    capacity: 1
+    capabilities: [offload_inbound]
+    execution_cost_per_unit: 2.4
+    windows:
+      - start: 0
+        end: 480
+  - id: outbound_load_machine_1
+    type: machine
+    capacity: 1
+    capabilities: [load_outbound]
+    execution_cost_per_unit: 2.8
+    windows:
+      - start: 0
+        end: 480
+  - id: forklift_1
+    type: forklift
+    capacity: 1
+    capabilities: [bulk_replenish]
+    execution_cost_per_unit: 2.1
+    windows:
+      - start: 0
+        end: 480
+  - id: human_1
+    type: human
+    capacity: 1
+    capabilities: [pick, pack, qa]
+    execution_cost_per_unit: 1.4
+    windows:
+      - start: 0
+        end: 480
+  - id: human_2
+    type: human
+    capacity: 1
+    capabilities: [pick, pack, qa]
+    execution_cost_per_unit: 1.4
+    windows:
+      - start: 0
+        end: 480
+  - id: human_3
+    type: human
+    capacity: 1
+    capabilities: [pick, pack]
+    execution_cost_per_unit: 1.35
+    windows:
+      - start: 0
+        end: 480
+  - id: van_1
+    type: van
+    capacity: 1
+    capabilities: [dock_inbound]
+    execution_cost_per_unit: 0.2
+    windows:
+      - start: 0
+        end: 60
+  - id: van_2
+    type: van
+    capacity: 1
+    capabilities: [dock_inbound]
+    execution_cost_per_unit: 0.2
+    windows:
+      - start: 10
+        end: 70
+  - id: van_3
+    type: van
+    capacity: 1
+    capabilities: [dock_outbound]
+    execution_cost_per_unit: 0.2
+    windows:
+      - start: 150
+        end: 220
+  - id: van_4
+    type: van
+    capacity: 1
+    capabilities: [dock_outbound]
+    execution_cost_per_unit: 0.2
+    windows:
+      - start: 210
+        end: 300
+tasks:
+  - id: inbound_van_1_offload
+    requested_time: 0
+    duration: 24
+    latest_start_time: 4
+    deadline: 35
+    priority: 12
+    allowed_actor_ids: [inbound_offload_machine_1]
+    required_capabilities: [offload_inbound]
+    preferred_actor_ids: [inbound_offload_machine_1]
+    actor_distances:
+      inbound_offload_machine_1: 1
+    phase_durations: [8, 10, 6]
+  - id: inbound_van_2_offload
+    requested_time: 10
+    duration: 24
+    latest_start_time: 14
+    deadline: 45
+    priority: 12
+    allowed_actor_ids: [inbound_offload_machine_2]
+    required_capabilities: [offload_inbound]
+    preferred_actor_ids: [inbound_offload_machine_2]
+    actor_distances:
+      inbound_offload_machine_2: 1
+    phase_durations: [7, 10, 7]
+  - id: inbound_van_1_transfer_to_pick_pack
+    requested_time: 18
+    duration: 22
+    deadline: 70
+    priority: 9
+    allowed_actor_ids: [robot_1, robot_2]
+    required_capabilities: [transfer_inbound]
+    preferred_actor_ids: [robot_1]
+    dependency_task_ids: [inbound_van_1_offload]
+    actor_distances:
+      robot_1: 1
+      robot_2: 3
+    phase_durations: [5, 12, 5]
+  - id: inbound_van_2_transfer_to_pick_pack
+    requested_time: 28
+    duration: 22
+    deadline: 80
+    priority: 9
+    allowed_actor_ids: [robot_1, robot_2]
+    required_capabilities: [transfer_inbound]
+    preferred_actor_ids: [robot_2]
+    dependency_task_ids: [inbound_van_2_offload]
+    actor_distances:
+      robot_1: 3
+      robot_2: 1
+    phase_durations: [5, 12, 5]
+  - id: forklift_replenish_zone_a
+    requested_time: 40
+    duration: 18
+    deadline: 95
+    priority: 8
+    allowed_actor_ids: [forklift_1]
+    required_capabilities: [bulk_replenish]
+    preferred_actor_ids: [forklift_1]
+    dependency_task_ids: [inbound_van_1_transfer_to_pick_pack]
+    actor_distances:
+      forklift_1: 1
+    phase_durations: [6, 6, 6]
+  - id: forklift_replenish_zone_b
+    requested_time: 50
+    duration: 18
+    deadline: 105
+    priority: 8
+    allowed_actor_ids: [forklift_1]
+    required_capabilities: [bulk_replenish]
+    preferred_actor_ids: [forklift_1]
+    dependency_task_ids: [inbound_van_2_transfer_to_pick_pack]
+    actor_distances:
+      forklift_1: 1
+    phase_durations: [6, 6, 6]
+  - id: order_1001_pick_pack
+    requested_time: 95
+    duration: 24
+    latest_start_time: 112
+    deadline: 136
+    priority: 6
+    allowed_actor_types: [robot, human]
+    preferred_actor_ids: [human_1, robot_3]
+    required_capabilities: [pick, pack]
+    dependency_task_ids: [forklift_replenish_zone_a]
+    actor_distances:
+      human_1: 1
+      human_2: 2
+      human_3: 2
+      robot_3: 1
+      robot_4: 2
+      robot_1: 5
+      robot_2: 5
+    phase_durations: [10, 8, 6]
+  - id: order_1001_transfer_to_outbound
+    requested_time: 119
+    duration: 18
+    deadline: 170
+    priority: 8
+    allowed_actor_ids: [robot_1, robot_2]
+    preferred_actor_ids: [robot_1]
+    required_capabilities: [transfer_outbound]
+    dependency_task_ids: [order_1001_pick_pack]
+    actor_distances:
+      robot_1: 1
+      robot_2: 3
+    phase_durations: [5, 8, 5]
+  - id: order_1001_load_van_3
+    requested_time: 150
+    duration: 20
+    latest_start_time: 170
+    deadline: 190
+    priority: 12
+    allowed_actor_ids: [outbound_load_machine_1]
+    preferred_actor_ids: [outbound_load_machine_1]
+    required_capabilities: [load_outbound]
+    dependency_task_ids: [order_1001_transfer_to_outbound]
+    actor_distances:
+      outbound_load_machine_1: 1
+    phase_durations: [7, 7, 6]
+
+  - id: order_1002_pick_pack
+    requested_time: 98
+    duration: 24
+    latest_start_time: 115
+    deadline: 139
+    priority: 6
+    allowed_actor_types: [robot, human]
+    preferred_actor_ids: [human_2, robot_4]
+    required_capabilities: [pick, pack]
+    dependency_task_ids: [forklift_replenish_zone_a]
+    actor_distances:
+      human_2: 1
+      human_1: 2
+      human_3: 2
+      robot_4: 1
+      robot_3: 2
+      robot_1: 5
+      robot_2: 5
+    phase_durations: [10, 8, 6]
+  - id: order_1002_transfer_to_outbound
+    requested_time: 122
+    duration: 18
+    deadline: 173
+    priority: 8
+    allowed_actor_ids: [robot_1, robot_2]
+    preferred_actor_ids: [robot_1]
+    required_capabilities: [transfer_outbound]
+    dependency_task_ids: [order_1002_pick_pack]
+    actor_distances:
+      robot_1: 1
+      robot_2: 3
+    phase_durations: [5, 8, 5]
+  - id: order_1002_load_van_3
+    requested_time: 155
+    duration: 20
+    latest_start_time: 175
+    deadline: 195
+    priority: 12
+    allowed_actor_ids: [outbound_load_machine_1]
+    preferred_actor_ids: [outbound_load_machine_1]
+    required_capabilities: [load_outbound]
+    dependency_task_ids: [order_1002_transfer_to_outbound]
+    actor_distances:
+      outbound_load_machine_1: 1
+    phase_durations: [7, 7, 6]
+
+  - id: order_1003_pick_pack
+    requested_time: 101
+    duration: 25
+    latest_start_time: 118
+    deadline: 143
+    priority: 6
+    allowed_actor_types: [robot, human]
+    preferred_actor_ids: [human_1, robot_3]
+    required_capabilities: [pick, pack]
+    dependency_task_ids: [forklift_replenish_zone_b]
+    actor_distances:
+      human_1: 1
+      human_2: 2
+      human_3: 2
+      robot_3: 1
+      robot_4: 2
+      robot_1: 5
+      robot_2: 5
+    phase_durations: [10, 9, 6]
+  - id: order_1003_transfer_to_outbound
+    requested_time: 126
+    duration: 18
+    deadline: 176
+    priority: 8
+    allowed_actor_ids: [robot_1, robot_2]
+    preferred_actor_ids: [robot_2]
+    required_capabilities: [transfer_outbound]
+    dependency_task_ids: [order_1003_pick_pack]
+    actor_distances:
+      robot_1: 3
+      robot_2: 1
+    phase_durations: [5, 8, 5]
+  - id: order_1003_load_van_3
+    requested_time: 160
+    duration: 20
+    latest_start_time: 180
+    deadline: 200
+    priority: 12
+    allowed_actor_ids: [outbound_load_machine_1]
+    preferred_actor_ids: [outbound_load_machine_1]
+    required_capabilities: [load_outbound]
+    dependency_task_ids: [order_1003_transfer_to_outbound]
+    actor_distances:
+      outbound_load_machine_1: 1
+    phase_durations: [7, 7, 6]
+
+  - id: order_1004_pick_pack
+    requested_time: 165
+    duration: 24
+    latest_start_time: 182
+    deadline: 206
+    priority: 5
+    allowed_actor_types: [robot, human]
+    preferred_actor_ids: [human_3, robot_4]
+    required_capabilities: [pick, pack]
+    dependency_task_ids: [forklift_replenish_zone_b]
+    actor_distances:
+      human_3: 1
+      human_2: 2
+      human_1: 2
+      robot_4: 1
+      robot_3: 2
+      robot_1: 5
+      robot_2: 5
+    phase_durations: [10, 8, 6]
+  - id: order_1004_transfer_to_outbound
+    requested_time: 189
+    duration: 18
+    deadline: 240
+    priority: 7
+    allowed_actor_ids: [robot_1, robot_2]
+    preferred_actor_ids: [robot_2]
+    required_capabilities: [transfer_outbound]
+    dependency_task_ids: [order_1004_pick_pack]
+    actor_distances:
+      robot_1: 2
+      robot_2: 1
+    phase_durations: [5, 8, 5]
+  - id: order_1004_load_van_4
+    requested_time: 225
+    duration: 20
+    latest_start_time: 265
+    deadline: 285
+    priority: 10
+    allowed_actor_ids: [outbound_load_machine_1]
+    preferred_actor_ids: [outbound_load_machine_1]
+    required_capabilities: [load_outbound]
+    dependency_task_ids: [order_1004_transfer_to_outbound]
+    actor_distances:
+      outbound_load_machine_1: 1
+    phase_durations: [7, 7, 6]

@@ -5,7 +5,14 @@ import {
   minutesToMilliseconds,
   toDatetimeLocalValue,
 } from "../lib/date-time";
-import type { DeleteTaskCommand, TaskEditorDraft, WorkflowDetail, WorkflowTask, WorkflowTaskMutation } from "../lib/types";
+import type {
+  DeleteTaskCommand,
+  TaskEditorDraft,
+  WorkflowDetail,
+  WorkflowScheduleMode,
+  WorkflowTask,
+  WorkflowTaskMutation,
+} from "../lib/types";
 
 interface TaskSimulatorProps {
   detail?: WorkflowDetail;
@@ -42,7 +49,14 @@ function makeDraftFromTask(task: WorkflowTask): TaskEditorDraft {
   };
 }
 
-function mergeTaskDraft(existingTask: WorkflowTask | undefined, draft: TaskEditorDraft, requiredCapabilities: string[], dependencyTaskIds: string[]): WorkflowTask {
+function mergeTaskDraft(
+  existingTask: WorkflowTask | undefined,
+  draft: TaskEditorDraft,
+  requiredCapabilities: string[],
+  dependencyTaskIds: string[],
+  defaultScheduleMode: WorkflowScheduleMode | undefined,
+  defaultScheduleAnchorMs: number | undefined,
+): WorkflowTask {
   const requestedTimeMs = fromDatetimeLocalValue(draft.requestedAt);
   const deadlineMs = fromDatetimeLocalValue(draft.deadlineAt);
 
@@ -59,6 +73,8 @@ function mergeTaskDraft(existingTask: WorkflowTask | undefined, draft: TaskEdito
         : undefined,
     deadlineMs,
     deadlineAt: deadlineMs > 0 ? formatDateTime(deadlineMs) : undefined,
+    scheduleMode: existingTask?.scheduleMode ?? defaultScheduleMode,
+    scheduleAnchorMs: existingTask?.scheduleAnchorMs ?? defaultScheduleAnchorMs,
     priority: draft.priority,
     demand: existingTask?.demand,
     mandatory: draft.mandatory,
@@ -194,7 +210,14 @@ export function TaskSimulator({ detail, busy, onSaveTask, onDeleteTask }: TaskSi
           if (deadlineError) {
             return;
           }
-          const task = mergeTaskDraft(editingTask, draft, requiredCapabilities, dependencyTaskIds);
+          const task = mergeTaskDraft(
+            editingTask,
+            draft,
+            requiredCapabilities,
+            dependencyTaskIds,
+            detail.scheduleMode,
+            detail.scheduleAnchorMs,
+          );
           void onSaveTask({
             workflowId: detail.summary.workflowId,
             task,

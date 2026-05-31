@@ -1086,16 +1086,12 @@ TEST(RuntimeApiTest, HttpClientRejectsMalformedProtobufResponsesFromPlainPeer) {
 }
 
 TEST(RuntimeApiTest, HttpClientReportsResolveAndReadFailuresFromPlainPeer) {
-  tp::BeastHttpWorkflowApiClient unresolved_client({.host = "task-orchestrator-invalid-host.invalid",
-                                                    .port = 80,
-                                                    .use_tls = false,
-                                                    .tls = {},
-                                                    .timeout_ms = 200,
-                                                    .bearer_token = "",
-                                                    .api_key = ""});
+  tp::BeastHttpWorkflowApiClient unresolved_client(
+      {.host = "", .port = 80, .use_tls = false, .tls = {}, .timeout_ms = 200, .bearer_token = "", .api_key = ""});
   const auto unresolved_response = unresolved_client.submit(make_submit_request());
   EXPECT_FALSE(unresolved_response.ok());
-  EXPECT_NE(unresolved_response.error_message().find("HTTP transport failed"), std::string::npos);
+  EXPECT_NE(unresolved_response.error_message().find("HTTP transport failed"), std::string::npos)
+      << unresolved_response.error_message();
 
   const OneShotServerHandle closing_server = start_one_shot_tcp_server([](tcp::socket socket) {
     receive_some_bytes(socket);
@@ -1143,7 +1139,7 @@ TEST(RuntimeApiTest, HttpClientsReportConnectFailuresAgainstUnusedPorts) {
 }
 
 TEST(RuntimeApiTest, HttpTlsClientReportsResolveHandshakeAndReadFailures) {
-  tp::BeastHttpWorkflowApiClient unresolved_client({.host = "task-orchestrator-invalid-host.invalid",
+  tp::BeastHttpWorkflowApiClient unresolved_client({.host = "",
                                                     .port = 443,
                                                     .use_tls = true,
                                                     .tls = make_client_tls_config(),

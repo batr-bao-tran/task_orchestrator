@@ -145,27 +145,33 @@ TEST_P(ExampleWorkflowScenarioTest, WorkflowExampleLoadsAndRuns) {
   EXPECT_GE(result.assignments.size(), expectation.min_assignments) << workflow_path;
 }
 
-INSTANTIATE_TEST_SUITE_P(ApplicationExamples,
-                         ExampleWorkflowScenarioTest,
-                         ::testing::Values(
-                             ExampleWorkflowExpectation{
-                                 .relative_path = "application/examples/workflow_configs/warehouse_simple.yaml",
-                                 .expect_capacity_issue = false,
-                                 .min_assignments = 3U,
-                             },
-                             ExampleWorkflowExpectation{
-                                 .relative_path = "application/examples/workflow_configs/warehouse_capacity_issue.yaml",
-                                 .expect_capacity_issue = true,
-                                 .min_assignments = 2U,
-                             },
-                             ExampleWorkflowExpectation{
-                                 .relative_path = "application/examples/workflow_configs/mixed_actors.yaml",
-                                 .expect_capacity_issue = false,
-                                 .min_assignments = 4U,
-                             },
-                             ExampleWorkflowExpectation{
-                                 .relative_path = "application/examples/workflow_configs/service_bootstrap_rich.yaml",
-                                 .expect_capacity_issue = false,
-                                 .min_assignments = 4U,
-                             }));
+INSTANTIATE_TEST_SUITE_P(
+    ApplicationExamples,
+    ExampleWorkflowScenarioTest,
+    ::testing::Values(
+        ExampleWorkflowExpectation{
+            .relative_path = "application/examples/workflow_configs/warehouse_simple.yaml",
+            .expect_capacity_issue = false,
+            .min_assignments = 3U,
+        },
+        ExampleWorkflowExpectation{
+            .relative_path = "application/examples/workflow_configs/warehouse_capacity_issue.yaml",
+            .expect_capacity_issue = true,
+            .min_assignments = 2U,
+        },
+        ExampleWorkflowExpectation{
+            .relative_path = "application/examples/workflow_configs/mixed_actors.yaml",
+            .expect_capacity_issue = false,
+            .min_assignments = 4U,
+        },
+        ExampleWorkflowExpectation{
+            .relative_path = "application/examples/workflow_configs/service_bootstrap_rich.yaml",
+            .expect_capacity_issue = false,
+            .min_assignments = 4U,
+        },
+        ExampleWorkflowExpectation{
+            .relative_path = "application/examples/workflow_configs/warehouse_continuous_pipeline.yaml",
+            .expect_capacity_issue = true,
+            .min_assignments = 12U,
+        }));
 }  // namespace
